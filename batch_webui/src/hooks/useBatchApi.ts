@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../api/mineru'
 import type { DocumentsResponse, StatusResponse } from '../api/types'
-import { runUploadChain, shouldStartQueuedRun, type UploadItem } from '../lib/uploadChain'
+import { partitionBySuffix, runUploadChain, shouldStartQueuedRun, type UploadItem } from '../lib/uploadChain'
 
 const ACTIVE_INTERVAL_MS = 1500
 const IDLE_INTERVAL_MS = 5000
@@ -12,6 +12,8 @@ export function useBatchApi() {
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const suffixes = useRef<string[]>([])
   // Armed by a 409: documents landed while another run held the lock.
   const pendingStart = useRef(false)
 
@@ -20,6 +22,7 @@ export function useBatchApi() {
       const [nextStatus, nextDocuments] = await Promise.all([api.getStatus(), api.getDocuments()])
       setStatus(nextStatus)
       setDocuments(nextDocuments)
+      suffixes.current = nextStatus.config.supported_suffixes ?? []
       setConnected(true)
       setError(null)
       if (shouldStartQueuedRun(pendingStart.current, nextStatus.state, nextDocuments.counts.pending ?? 0)) {
@@ -62,9 +65,18 @@ export function useBatchApi() {
 
   const submit = useCallback(
     async (items: UploadItem[]) => {
+      const { accepted, rejected } = partitionBySuffix(items, suffixes.current)
+      setNotice(
+        rejected.length
+          ? `Skipped ${rejected.length} file(s) the parser cannot read: ${rejected.slice(0, 3).join(', ')}${
+              rejected.length > 3 ? ', …' : ''
+            }`
+          : null,
+      )
+      if (accepted.length === 0) return
       setBusy(true)
       try {
-        const result = await runUploadChain(items, { upload: api.uploadFiles, start: api.startRun })
+        const result = await runUploadChain(accepted, { upload: api.uploadFiles, start: api.startRun })
         pendingStart.current = result.queuedBehindRun
         await refresh()
       } catch (failure) {
@@ -106,5 +118,5 @@ export function useBatchApi() {
     [refresh],
   )
 
-  return { status, documents, error, connected, busy, refresh, submit, stop, clear, remove }
+  return { status, documents, error, notice, connected, busy, refresh, submit, stop, clear, remove }
 }

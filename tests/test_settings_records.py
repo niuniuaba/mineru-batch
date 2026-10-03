@@ -75,3 +75,12 @@ def test_storage_paths_are_reported(api: TestClient, tmp_path) -> None:
     config = api.get("/api/status").json()["config"]
     assert config["input_dir"] == str(tmp_path / "ee-in")
     assert config["output_dir"] == str(tmp_path / "ee-md")
+
+
+def test_supported_suffixes_are_declared(api: TestClient) -> None:
+    """The console filters drops against this, so it must match what the runner will pick up."""
+    suffixes = api.get("/api/status").json()["config"]["supported_suffixes"]
+    assert ".pdf" in suffixes
+    assert ".docx" in suffixes
+    assert ".txt" not in suffixes
+    assert suffixes == sorted(suffixes)

@@ -46,6 +46,7 @@ export interface StatusResponse {
     input_dir: string
     output_dir: string
     queued_in_input: number
+    supported_suffixes: string[]
     environment: Record<string, string>
     disk: { free: number; total: number }
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api/client'
-import { runUploadChain, shouldStartQueuedRun } from './uploadChain'
+import { partitionBySuffix, runUploadChain, shouldStartQueuedRun } from './uploadChain'
 
 const file = () => new File(['x'], 'a.pdf')
 
@@ -46,5 +46,27 @@ describe('shouldStartQueuedRun', () => {
 
   it('does not start unless a 409 armed it', () => {
     expect(shouldStartQueuedRun(false, 'idle', 3)).toBe(false)
+  })
+})
+
+describe('partitionBySuffix', () => {
+  const item = (relative: string) => ({ file: file(), relative })
+
+  it('keeps what the runner can parse and names what it cannot', () => {
+    const result = partitionBySuffix([item('a.pdf'), item('notes.txt')], ['.pdf', '.docx'])
+    expect(result.accepted.map((i) => i.relative)).toEqual(['a.pdf'])
+    expect(result.rejected).toEqual(['notes.txt'])
+  })
+
+  it('matches the suffix case-insensitively', () => {
+    expect(partitionBySuffix([item('A.PDF')], ['.pdf']).accepted).toHaveLength(1)
+  })
+
+  it('rejects a file with no extension', () => {
+    expect(partitionBySuffix([item('README')], ['.pdf']).rejected).toEqual(['README'])
+  })
+
+  it('rejects everything when the server declares nothing', () => {
+    expect(partitionBySuffix([item('a.pdf')], []).rejected).toEqual(['a.pdf'])
   })
 })

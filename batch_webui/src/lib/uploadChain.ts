@@ -48,3 +48,26 @@ export async function runUploadChain(
 export function shouldStartQueuedRun(armed: boolean, state: string, pendingCount: number): boolean {
   return armed && state !== 'running' && pendingCount > 0
 }
+
+/**
+ * Split a drop into what the runner can parse and what it will ignore.
+ *
+ * The runner only picks up known suffixes, so an unsupported file would upload and then
+ * silently never appear. Filtering here — against the list the server declares — makes
+ * that visible instead.
+ */
+export function partitionBySuffix(
+  items: UploadItem[],
+  suffixes: string[],
+): { accepted: UploadItem[]; rejected: string[] } {
+  const allowed = new Set(suffixes.map((suffix) => suffix.toLowerCase()))
+  const accepted: UploadItem[] = []
+  const rejected: string[] = []
+  for (const item of items) {
+    const dot = item.relative.lastIndexOf('.')
+    const suffix = dot >= 0 ? item.relative.slice(dot).toLowerCase() : ''
+    if (allowed.has(suffix)) accepted.push(item)
+    else rejected.push(item.relative)
+  }
+  return { accepted, rejected }
+}

@@ -615,6 +615,9 @@ async def api_status() -> dict[str, Any]:
         "input_dir": str(settings.input_dir),
         "output_dir": str(settings.output_dir),
         "queued_in_input": len(_input_documents()),
+        # What the runner will actually pick up. The console filters drops against this so
+        # an unsupported file cannot be accepted and then silently vanish from the table.
+        "supported_suffixes": sorted(PARSEABLE_SUFFIXES),
         "environment": {
             "mineru_version": importlib.metadata.version("mineru"),
             "python": sys.version.split()[0],
