@@ -114,12 +114,13 @@ class RunState:
         # The runner prints a line only when a document *finishes*, so a long document
         # would otherwise leave the UI with nothing to name. It processes in the order we
         # queued them, so the head of the queue stands in for "running" — no engine change.
-        if self.state == "running":
-            for row in self.files.values():
-                if row["status"] == "queued":
-                    row["status"] = "running"
-                    self.current = row["name"]
-                    break
+        # Derived, never written back: this runs on every poll, and the console polls every
+        # 1.5 seconds. Mutating here made each request advance the queue by one document.
+        current = self.current
+        if self.state == "running" and current is None:
+            current = next((row["name"] for row in self.files.values() if row["status"] == "running"), None)
+            if current is None:
+                current = next((row["name"] for row in self.files.values() if row["status"] == "queued"), None)
 
         counts = {"queued": 0, "running": 0, "done": 0, "skipped": 0, "failed": 0}
         for row in self.files.values():
@@ -128,7 +129,7 @@ class RunState:
             "state": self.state,
             "external": self.external,
             "pid": self.pid,
-            "current_file": self.current,
+            "current_file": current,
             "window": self.window,
             "message": self.message,
             "returncode": self.returncode,
@@ -305,21 +306,34 @@ def _config_records() -> list[dict[str, Any]]:
     ]
 
 
+def _report_entries() -> dict[str, dict[str, Any]]:
+    """Run-report entries keyed by the output path inside ee-md.
+
+    The report is the only record that a document was *attempted*: a failure leaves no
+    `.md` behind, so without it a failed document would silently revert to "pending" once
+    the run ends and its error message would be lost.
+    """
+    settings = get_settings()
+    entries: dict[str, dict[str, Any]] = {}
+    if not settings.report.is_file():
+        return entries
+    try:
+        for entry in json.loads(settings.report.read_text(encoding="utf-8")).get("entries", []):
+            output = Path(entry.get("output", ""))
+            try:
+                key = output.relative_to(settings.output_dir).as_posix()
+            except ValueError:
+                continue
+            entries[key] = entry
+    except (OSError, ValueError):
+        pass
+    return entries
+
+
 def _result_index() -> dict[str, dict[str, Any]]:
     """Converted documents keyed by their path inside ee-md, joined with the run report."""
     settings = get_settings()
-    metadata: dict[str, dict[str, Any]] = {}
-    if settings.report.is_file():
-        try:
-            for entry in json.loads(settings.report.read_text(encoding="utf-8")).get("entries", []):
-                output = Path(entry.get("output", ""))
-                try:
-                    key = output.relative_to(settings.output_dir).as_posix()
-                except ValueError:
-                    continue
-                metadata[key] = entry
-        except (OSError, ValueError):
-            pass
+    metadata = _report_entries()
 
     results: dict[str, dict[str, Any]] = {}
     if not settings.output_dir.is_dir():
@@ -376,12 +390,34 @@ def _document_rows() -> list[dict[str, Any]]:
                 row["rate"] = round(info["pages"] / info["seconds"], 2)
         rows[stem] = row
 
+    # Attempted-but-not-produced documents: a failure leaves no .md, so the report is the
+    # only place its outcome survives the run.
+    for relative, entry in _report_entries().items():
+        stem = _stem(relative)
+        row = rows.get(stem)
+        if row is not None and row["has_result"]:
+            continue
+        row = row or _blank_row(relative)
+        row["path"] = relative
+        if entry.get("status") == "failed":
+            row["status"] = "failed"
+            row["error"] = entry.get("error")
+        if entry.get("pages") is not None:
+            row["pages"] = entry["pages"]
+        rows[stem] = row
+
     if state.state == "running":
         for relative, live in state.files.items():
             stem = _stem(relative)
             row = rows.get(stem) or _blank_row(relative)
             row.update({key: value for key, value in live.items() if key != "name"})
             rows[stem] = row
+        # The runner only reports on completion, so the head of the queue stands in for
+        # "running". Marked on the merged copy, never in the live state.
+        if not any(row["status"] == "running" for row in rows.values()):
+            head = next((_stem(rel) for rel, live in state.files.items() if live["status"] == "queued"), None)
+            if head is not None and rows.get(head, {}).get("status") == "queued":
+                rows[head]["status"] = "running"
 
     return sorted(rows.values(), key=lambda row: row["path"])
 
@@ -657,15 +693,19 @@ async def api_delete_documents(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="provide a non-empty list of paths")
     delete_result = bool(body.get("delete_result", True))
 
-    deleted: list[dict[str, Any]] = []
-    missing: list[str] = []
+    # Validate EVERY path before removing anything. Deleting as we went meant one unsafe
+    # path further down the list answered 400 after earlier files were already gone — the
+    # caller saw a total failure while part of the batch had been destroyed.
+    targets: list[tuple[str, Path, Path]] = []
     for raw in paths:
         relative = str(raw)
-        # Validate against both roots before touching anything: an unsafe path fails the
-        # request rather than being skipped, because it means the caller is confused.
         result_target = _resolve_within(settings.output_dir, relative)
         input_target = _resolve_within(settings.input_dir, _stem(relative) + _input_suffix(relative))
+        targets.append((relative, input_target, result_target))
 
+    deleted: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for relative, input_target, result_target in targets:
         removed_result = False
         removed_input = False
         if delete_result and result_target.is_file():
@@ -865,6 +905,7 @@ async def api_zip(request: Request) -> FileResponse:
         raise HTTPException(status_code=400, detail="provide a non-empty list of paths")
 
     handle = tempfile.NamedTemporaryFile(prefix="mineru-batch-", suffix=".zip", delete=False)
+    temp_path = handle.name
     added = 0
     try:
         with zipfile.ZipFile(handle, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -875,14 +916,18 @@ async def api_zip(request: Request) -> FileResponse:
                     continue
                 archive.write(target, arcname=target.relative_to(get_settings().output_dir.resolve()).as_posix())
                 added += 1
-    finally:
+    except BaseException:
+        # Any failure — a refused path, a read error — must not leave the temp file behind.
+        # This endpoint is unauthenticated, so a repeatable leak is a disk-filling loop.
         handle.close()
+        Path(temp_path).unlink(missing_ok=True)
+        raise
+    handle.close()
     if not added:
-        Path(handle.name).unlink(missing_ok=True)
+        Path(temp_path).unlink(missing_ok=True)
         raise HTTPException(status_code=404, detail="none of the selected paths are converted markdown files")
 
     name = f"mineru-markdown-{time.strftime('%Y%m%d-%H%M%S')}.zip"
-    temp_path = handle.name
     return FileResponse(
         temp_path,
         media_type="application/zip",

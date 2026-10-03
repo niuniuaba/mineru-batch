@@ -23,9 +23,14 @@ async function fromEntry(entry: FileSystemEntryLike, prefix: string, out: Upload
   }
   if (entry.isDirectory) {
     const reader = entry.createReader()
-    const entries = await new Promise<FileSystemEntryLike[]>((resolve, reject) => reader.readEntries(resolve, reject))
     const nested = `${prefix}${entry.name}/`
-    for (const child of entries) await fromEntry(child, nested, out)
+    // The reader hands back entries in batches and signals the end with an empty batch.
+    // Reading it once silently truncates any folder with more than a batch of files.
+    for (;;) {
+      const batch = await new Promise<FileSystemEntryLike[]>((resolve, reject) => reader.readEntries(resolve, reject))
+      if (batch.length === 0) break
+      for (const child of batch) await fromEntry(child, nested, out)
+    }
   }
 }
 

@@ -22,3 +22,10 @@ export function bucketOf(status: DocStatus): Exclude<Bucket, 'all'> {
 export function matchesBucket(row: DocRow, bucket: Bucket): boolean {
   return bucket === 'all' || bucketOf(row.status) === bucket
 }
+
+/** Counts per filter tab. The tabs are buckets, so raw statuses must not be counted directly. */
+export function bucketCounts(rows: DocRow[]): Record<Bucket, number> {
+  const counts: Record<Bucket, number> = { all: rows.length, pending: 0, running: 0, converted: 0, failed: 0 }
+  for (const row of rows) counts[bucketOf(row.status)] += 1
+  return counts
+}

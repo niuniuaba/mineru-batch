@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { DropZone } from './DropZone'
@@ -37,5 +37,38 @@ describe('DropZone', () => {
     render(<DropZone onSubmit={onSubmit} busy={false} />)
     await userEvent.click(screen.getByRole('button', { name: /files/i }))
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
+describe('DropZone dropped folders', () => {
+  it('drains the directory reader, so a folder is not truncated at one batch', async () => {
+    // FileSystemDirectoryReader hands back entries in batches and signals the end with an
+    // empty one. Reading only the first batch silently drops everything after ~100 files.
+    const fileEntry = (name: string) => ({
+      isFile: true,
+      isDirectory: false,
+      name,
+      file: (resolve: (file: File) => void) => resolve(new File(['x'], name)),
+    })
+    let batch = 0
+    const batches = [[fileEntry('a.pdf')], [fileEntry('b.pdf')], []]
+    const dirEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: 'papers',
+      createReader: () => ({
+        readEntries: (resolve: (entries: unknown[]) => void) => resolve(batches[batch++] ?? []),
+      }),
+    }
+    const onSubmit = vi.fn()
+    render(<DropZone onSubmit={onSubmit} busy={false} />)
+    fireEvent.drop(screen.getByTestId('dropzone'), {
+      dataTransfer: { items: [{ webkitGetAsEntry: () => dirEntry }], files: [] },
+    })
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0].map((item: { relative: string }) => item.relative)).toEqual([
+      'papers/a.pdf',
+      'papers/b.pdf',
+    ])
   })
 })

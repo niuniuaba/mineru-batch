@@ -5,7 +5,7 @@ import { PreviewDrawer } from './PreviewDrawer'
 const getContent = vi.fn()
 vi.mock('../api/mineru', () => ({
   getContent: (path: string) => getContent(path),
-  resultDownloadUrl: (path: string) => `/api/results/download?path=${encodeURIComponent(path)}`,
+  downloadResult: () => Promise.resolve(new Blob(['x'])),
 }))
 
 describe('PreviewDrawer', () => {
@@ -32,12 +32,11 @@ describe('PreviewDrawer', () => {
     expect(await screen.findByText(/figure omitted: ImageBlock/)).toBeInTheDocument()
   })
 
-  it('offers a download link for the same document', async () => {
+  it('offers a download for the same document', async () => {
     getContent.mockClear()
     getContent.mockResolvedValue('# t')
     render(<PreviewDrawer path="papers/a b.md" onClose={() => {}} />)
-    const link = await screen.findByRole('link', { name: /download/i })
-    expect(link).toHaveAttribute('href', '/api/results/download?path=papers%2Fa%20b.md')
+    expect(await screen.findByRole('button', { name: /download/i })).toBeInTheDocument()
   })
 
   it('surfaces a fetch failure', async () => {

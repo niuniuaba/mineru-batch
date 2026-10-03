@@ -42,6 +42,15 @@ export const deleteDocuments = async (
 ): Promise<{ deleted: { path: string; input: boolean; result: boolean }[]; missing: string[] }> =>
   (await http.post('/api/documents/delete', { paths, delete_result: deleteResult })).data
 
+/**
+ * Fetch a converted document as a blob. Used instead of a plain link so the request goes
+ * through axios and carries any bearer token; a browser navigation would send none.
+ */
+export async function downloadResult(path: string): Promise<Blob> {
+  const response = await http.get('/api/results/download', { params: { path }, responseType: 'blob' })
+  return response.data as Blob
+}
+
 export const resultDownloadUrl = (path: string): string =>
   `/api/results/download?path=${encodeURIComponent(path)}`
 

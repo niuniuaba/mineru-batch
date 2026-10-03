@@ -68,3 +68,17 @@ describe('DocumentsTable', () => {
     expect(screen.getByLabelText('Select a.md')).toBeChecked()
   })
 })
+
+describe('per-row download', () => {
+  it('offers a download for a converted row', async () => {
+    const onDownload = vi.fn()
+    render(<DocumentsTable rows={[row({})]} {...props} onDownload={onDownload} />)
+    await userEvent.click(screen.getByRole('button', { name: /download a.md/i }))
+    expect(onDownload).toHaveBeenCalledWith('a.md')
+  })
+
+  it('offers no download for a row without a result', () => {
+    render(<DocumentsTable rows={[row({ status: 'pending', has_result: false })]} {...props} onDownload={() => {}} />)
+    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument()
+  })
+})

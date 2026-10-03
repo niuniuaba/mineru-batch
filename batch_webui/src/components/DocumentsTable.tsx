@@ -6,6 +6,7 @@ interface Props {
   onToggle: (path: string) => void
   onToggleAll: (checked: boolean) => void
   onPreview: (path: string) => void
+  onDownload?: (path: string) => void
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -18,7 +19,7 @@ const STATUS_STYLE: Record<string, string> = {
   failed: 'bg-red-100 text-red-800',
 }
 
-export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPreview }: Props) {
+export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPreview, onDownload }: Props) {
   const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.path))
   return (
     <table className="w-full text-left text-sm">
@@ -38,6 +39,7 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
           <th className="p-2">Seconds</th>
           <th className="p-2">Page/s</th>
           <th className="p-2">Error</th>
+          <th className="p-2">Download</th>
         </tr>
       </thead>
       <tbody>
@@ -73,6 +75,18 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
             <td className="p-2">{row.seconds != null ? row.seconds.toFixed(1) : '—'}</td>
             <td className="p-2">{row.rate ?? '—'}</td>
             <td className="p-2 text-red-700">{row.error ?? ''}</td>
+            <td className="p-2">
+              {row.has_result && onDownload && (
+                <button
+                  type="button"
+                  aria-label={`Download ${row.path}`}
+                  onClick={() => onDownload(row.path)}
+                  className="text-blue-700 hover:underline"
+                >
+                  Download
+                </button>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>

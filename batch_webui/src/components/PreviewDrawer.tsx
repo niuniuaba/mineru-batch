@@ -3,7 +3,8 @@ import Markdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { getContent, resultDownloadUrl } from '../api/mineru'
+import { downloadResult, getContent } from '../api/mineru'
+import { downloadBlob } from '../lib/download'
 import { loadPreview } from '../lib/preview'
 
 interface Props {
@@ -40,9 +41,17 @@ export function PreviewDrawer({ path, onClose }: Props) {
     >
       <header className="mb-4 flex items-center gap-3">
         <h2 className="flex-1 truncate font-medium">{path}</h2>
-        <a href={resultDownloadUrl(path)} className="text-sm text-blue-700 hover:underline">
+        <button
+          type="button"
+          onClick={() => {
+            // Through axios, so a bearer token travels with the request. A plain link
+            // would send none and a token-protected server would answer 401.
+            void downloadResult(path).then((blob) => downloadBlob(blob, path.split('/').pop() ?? 'document.md'))
+          }}
+          className="text-sm text-blue-700 hover:underline"
+        >
           Download
-        </a>
+        </button>
         <button
           type="button"
           onClick={() => void navigator.clipboard?.writeText(text)}

@@ -21,21 +21,23 @@ const status = {
 
 describe('ServerIndicator', () => {
   it('says it is connected when the server answers', () => {
-    render(<ServerIndicator connected status={status} />)
+    render(<ServerIndicator connected status={status} lastCheck={new Date()} latencyMs={12} />)
     expect(screen.getByText('Connected')).toBeInTheDocument()
   })
 
   it('says it is disconnected when the server does not', () => {
-    render(<ServerIndicator connected={false} status={status} />)
+    render(<ServerIndicator connected={false} status={status} lastCheck={null} latencyMs={null} />)
     expect(screen.getByText('Disconnected')).toBeInTheDocument()
   })
 
   it('reveals the server facts on demand', async () => {
-    render(<ServerIndicator connected status={status} />)
+    render(<ServerIndicator connected status={status} lastCheck={new Date()} latencyMs={12} />)
     expect(screen.queryByText(/4\.0\.8/)).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /connected/i }))
     expect(screen.getByText(/4\.0\.8/)).toBeInTheDocument()
     expect(screen.getByText('/root/ee-md')).toBeInTheDocument()
     expect(screen.getByText(/queued/)).toBeInTheDocument()
+    expect(screen.getByText(/onnx/)).toBeInTheDocument()
+    expect(screen.getByText(/last check/i)).toBeInTheDocument()
   })
 })

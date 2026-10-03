@@ -13,13 +13,18 @@ export function useBatchApi() {
   const [connected, setConnected] = useState(true)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [lastCheck, setLastCheck] = useState<Date | null>(null)
+  const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const suffixes = useRef<string[]>([])
   // Armed by a 409: documents landed while another run held the lock.
   const pendingStart = useRef(false)
 
   const refresh = useCallback(async () => {
+    const startedAt = performance.now()
     try {
       const [nextStatus, nextDocuments] = await Promise.all([api.getStatus(), api.getDocuments()])
+      setLastCheck(new Date())
+      setLatencyMs(Math.round(performance.now() - startedAt))
       setStatus(nextStatus)
       setDocuments(nextDocuments)
       suffixes.current = nextStatus.config.supported_suffixes ?? []
@@ -118,5 +123,5 @@ export function useBatchApi() {
     [refresh],
   )
 
-  return { status, documents, error, notice, connected, busy, refresh, submit, stop, clear, remove }
+  return { status, documents, error, notice, connected, lastCheck, latencyMs, busy, refresh, submit, stop, clear, remove }
 }
