@@ -37,7 +37,7 @@ export function PreviewDrawer({ path, onClose }: Props) {
     <aside
       role="complementary"
       aria-label="Preview"
-      className="fixed inset-y-0 right-0 z-20 w-1/2 overflow-y-auto border-l bg-white p-6 shadow-xl"
+      className="fixed inset-y-0 right-0 z-20 w-1/2 overflow-y-auto border-l border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900"
     >
       <header className="mb-4 flex items-center gap-3">
         <h2 className="flex-1 truncate font-medium">{path}</h2>
@@ -67,7 +67,7 @@ export function PreviewDrawer({ path, onClose }: Props) {
           ✕
         </button>
       </header>
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && <p className="text-sm text-red-700 dark:text-red-400">{error}</p>}
       <article className="prose prose-sm max-w-none">
         <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
           {text}

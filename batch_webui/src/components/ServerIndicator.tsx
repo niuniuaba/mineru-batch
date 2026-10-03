@@ -23,10 +23,10 @@ export function ServerIndicator({ connected, status, lastCheck, latencyMs }: Pro
             connected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
           }`}
         />
-        <span className="text-slate-500">{connected ? 'Connected' : 'Disconnected'}</span>
+        <span className="text-slate-500 dark:text-slate-400">{connected ? 'Connected' : 'Disconnected'}</span>
       </button>
       {open && (
-        <div className="absolute right-4 bottom-8 w-80 rounded border bg-white p-3 text-left shadow-lg">
+        <div className="absolute right-4 bottom-8 w-80 rounded border border-slate-200 bg-white p-3 text-left shadow-lg dark:border-slate-700 dark:bg-slate-800">
           <p>
             <strong>server</strong> {window.location.origin}
           </p>

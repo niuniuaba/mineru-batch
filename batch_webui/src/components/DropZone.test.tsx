@@ -3,13 +3,41 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { DropZone } from './DropZone'
 
+const openPicker = async (choice: RegExp) => {
+  await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
+  await userEvent.click(screen.getByRole('menuitem', { name: choice }))
+}
+
 describe('DropZone', () => {
-  it('offers an upload button that opens the file picker', async () => {
+  it('offers a single upload button, not one per source', () => {
+    render(<DropZone onSubmit={vi.fn()} busy={false} />)
+    expect(screen.getAllByRole('button', { name: /^upload$/i })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: /folder/i })).not.toBeInTheDocument()
+  })
+
+  it('reveals the file and folder choices from that one button', async () => {
+    render(<DropZone onSubmit={vi.fn()} busy={false} />)
+    expect(screen.queryByRole('menuitem', { name: /files/i })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
+    expect(screen.getByRole('menuitem', { name: /files/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /folder/i })).toBeInTheDocument()
+  })
+
+  it('opens the file picker from the files choice', async () => {
     const onSubmit = vi.fn()
     render(<DropZone onSubmit={onSubmit} busy={false} />)
     const input = screen.getByTestId('file-input') as HTMLInputElement
     const click = vi.spyOn(input, 'click').mockImplementation(() => {})
-    await userEvent.click(screen.getByRole('button', { name: /files/i }))
+    await openPicker(/files/i)
+    expect(click).toHaveBeenCalled()
+  })
+
+  it('opens the folder picker from the folder choice', async () => {
+    const onSubmit = vi.fn()
+    render(<DropZone onSubmit={onSubmit} busy={false} />)
+    const input = screen.getByTestId('folder-input') as HTMLInputElement
+    const click = vi.spyOn(input, 'click').mockImplementation(() => {})
+    await openPicker(/folder/i)
     expect(click).toHaveBeenCalled()
   })
 
@@ -26,16 +54,24 @@ describe('DropZone', () => {
   it('falls back to the bare filename when no relative path is available', async () => {
     const onSubmit = vi.fn()
     render(<DropZone onSubmit={onSubmit} busy={false} />)
-    const input = screen.getByTestId('file-input') as HTMLInputElement
     const file = new File(['x'], 'plain.pdf')
-    await userEvent.upload(input, file)
+    await userEvent.upload(screen.getByTestId('file-input'), file)
     expect(onSubmit).toHaveBeenCalledWith([{ file, relative: 'plain.pdf' }])
   })
 
   it('does not submit when the picker returns nothing', async () => {
     const onSubmit = vi.fn()
     render(<DropZone onSubmit={onSubmit} busy={false} />)
-    await userEvent.click(screen.getByRole('button', { name: /files/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('ignores a drop while an upload is already running', () => {
+    const onSubmit = vi.fn()
+    render(<DropZone onSubmit={onSubmit} busy />)
+    fireEvent.drop(screen.getByTestId('dropzone'), {
+      dataTransfer: { items: [], files: [new File(['x'], 'a.pdf')] },
+    })
     expect(onSubmit).not.toHaveBeenCalled()
   })
 })

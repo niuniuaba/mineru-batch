@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import App from './App'
@@ -67,5 +67,43 @@ describe('App', () => {
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: /server parameters/i }))
     expect(screen.getByRole('button', { name: /hide server parameters/i })).toBeInTheDocument()
+  })
+})
+
+describe('header', () => {
+  it('opens the add-documents dialog from the one Upload button', async () => {
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^upload$/i }))
+    const dialog = screen.getByRole('dialog', { name: /add documents/i })
+    expect(within(dialog).getByTestId('dropzone')).toBeInTheDocument()
+  })
+
+  it('closes the dialog again', async () => {
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^upload$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^close$/i }))
+    expect(screen.queryByRole('dialog', { name: /add documents/i })).not.toBeInTheDocument()
+  })
+
+  it('closes the upload dialog on Escape', async () => {
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: /^upload$/i }))
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: /add documents/i })).not.toBeInTheDocument()
+  })
+
+  it('keeps the upload area out of the page until it is asked for', async () => {
+    render(<App />)
+    await screen.findByRole('button', { name: /^upload$/i })
+    expect(screen.queryByTestId('dropzone')).not.toBeInTheDocument()
+  })
+
+  it('offers a theme toggle', async () => {
+    render(<App />)
+    const toggle = await screen.findByRole('button', { name: /switch to (light|dark) theme/i })
+    const before = document.documentElement.classList.contains('dark')
+    await userEvent.click(toggle)
+    expect(document.documentElement.classList.contains('dark')).not.toBe(before)
+    document.documentElement.classList.remove('dark')
   })
 })

@@ -225,6 +225,22 @@ def _stem(relative: str) -> str:
     return PurePosixPath(relative).with_suffix("").as_posix()
 
 
+def _prune_empty_parents(path: Path, root: Path) -> None:
+    """Remove `path`'s parent chain while it is empty, stopping at `root`.
+
+    Deleting the last document under a folder used to leave the folder skeleton behind, so
+    the mirrored output tree accumulated empty directories.
+    """
+    root = root.resolve()
+    parent = path.parent
+    while parent != root and root in parent.parents:
+        try:
+            parent.rmdir()
+        except OSError:
+            return  # still holds something, or is already gone
+        parent = parent.parent
+
+
 def _input_suffixes() -> dict[str, str]:
     """Stem → the input's own extension, for every queued document.
 
@@ -404,16 +420,23 @@ def _document_rows() -> list[dict[str, Any]]:
     for relative, entry in report_entries.items():
         stem = _stem(relative)
         row = rows.get(stem)
-        if row is not None and row["has_result"]:
+        if row is not None:
+            # The input or the result is still on disk, so the row already has the right
+            # status; the report only knows the page count better.
+            if entry.get("pages") is not None and row["pages"] is None:
+                row["pages"] = entry["pages"]
             continue
-        row = row or _blank_row(relative)
-        row["path"] = relative
-        if entry.get("status") == "failed":
-            row["status"] = "failed"
-            row["error"] = entry.get("error")
-        if entry.get("pages") is not None:
-            row["pages"] = entry["pages"]
-        rows[stem] = row
+        # Neither the input nor the result exists. Only a failure explains that by design,
+        # because a failure writes no output. Anything else means the document was deleted,
+        # and resurrecting it would show a row for something that is gone.
+        if entry.get("status") != "failed":
+            continue
+        rows[stem] = {
+            **_blank_row(relative),
+            "status": "failed",
+            "error": entry.get("error"),
+            "pages": entry.get("pages"),
+        }
 
     if state.state == "running":
         for relative, live in state.files.items():
@@ -730,9 +753,11 @@ async def api_delete_documents(request: Request) -> dict[str, Any]:
         removed_input = False
         if delete_result and result_target.is_file():
             result_target.unlink()
+            _prune_empty_parents(result_target, settings.output_dir)
             removed_result = True
         if input_target.is_file():
             input_target.unlink()
+            _prune_empty_parents(input_target, settings.input_dir)
             removed_input = True
 
         if removed_input or removed_result:

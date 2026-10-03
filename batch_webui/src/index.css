@@ -1,3 +1,20 @@
 @import 'tailwindcss';
 @plugin "@tailwindcss/typography";
 @import 'katex/dist/katex.min.css';
+
+/* Class-based so the toggle can override the system preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+body {
+  background: white;
+}
+.dark body {
+  background: #0f172a;
+  color: #e2e8f0;
+}

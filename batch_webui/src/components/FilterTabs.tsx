@@ -17,7 +17,9 @@ export function FilterTabs({ value, counts, onChange }: Props) {
           aria-selected={value === bucket}
           onClick={() => onChange(bucket)}
           className={`rounded px-3 py-1 text-sm capitalize ${
-            value === bucket ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+            value === bucket
+              ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+              : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
           }`}
         >
           {bucket}

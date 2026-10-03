@@ -276,3 +276,47 @@ def test_documents_reads_the_report_once(api: TestClient, tmp_path: Path, monkey
     monkeypatch.setattr(batch_api, "_report_entries", counting)
     api.get("/api/documents")
     assert calls["n"] <= 1, f"the run report was parsed {calls['n']} times in one request"
+
+
+# ── issues.md items 4 and 5 ─────────────────────────────────────────────────
+
+
+def test_a_deleted_document_disappears_from_the_list(api: TestClient, tmp_path: Path) -> None:
+    """A stale run-report entry must not resurrect a document the user just deleted."""
+    _write_input(tmp_path, "a.pdf")
+    _write_result(tmp_path, "a.pdf")
+    _write_report(tmp_path, [_entry(tmp_path, "a", "done")])
+    assert {row["path"] for row in api.get("/api/documents").json()["files"]} == {"a.md"}
+
+    api.post("/api/documents/delete", json={"paths": ["a.md"]})
+
+    assert api.get("/api/documents").json()["files"] == [], "the deleted document came back"
+
+
+def test_a_failed_document_with_no_output_still_appears(api: TestClient, tmp_path: Path) -> None:
+    """The counterpart: a failure leaves no output by design, so it must still be listed."""
+    _write_report(tmp_path, [_entry(tmp_path, "a", "failed", error="ValueError: boom")])
+    rows = {row["path"]: row for row in api.get("/api/documents").json()["files"]}
+    assert rows["a.md"]["status"] == "failed"
+
+
+def test_delete_prunes_the_directories_it_empties(api: TestClient, tmp_path: Path) -> None:
+    """Deleting the last document under a folder used to leave the folder skeleton behind."""
+    _write_input(tmp_path, "x/y/a.pdf")
+    _write_result(tmp_path, "x/y/a.pdf")
+
+    api.post("/api/documents/delete", json={"paths": ["x/y/a.md"]})
+
+    assert not any((tmp_path / "ee-md").rglob("*")), "empty folders survived in the output tree"
+    assert not any((tmp_path / "ee-in").rglob("*")), "empty folders survived in the input tree"
+
+
+def test_delete_keeps_directories_that_still_hold_something(api: TestClient, tmp_path: Path) -> None:
+    _write_input(tmp_path, "x/a.pdf")
+    _write_result(tmp_path, "x/a.pdf")
+    _write_result(tmp_path, "x/keep.pdf")
+
+    api.post("/api/documents/delete", json={"paths": ["x/a.md"]})
+
+    assert (tmp_path / "ee-md" / "x" / "keep.md").exists()
+    assert (tmp_path / "ee-md" / "x").is_dir()

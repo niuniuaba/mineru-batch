@@ -23,7 +23,7 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
   const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.path))
   return (
     <table className="w-full text-left text-sm">
-      <thead className="border-b text-slate-500">
+      <thead className="border-b border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400">
         <tr>
           <th className="p-2">
             <input
@@ -44,7 +44,7 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={row.path} className="border-b hover:bg-slate-50">
+          <tr key={row.path} className="border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800">
             <td className="p-2">
               <input
                 type="checkbox"
@@ -58,7 +58,7 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
                 type="button"
                 disabled={!row.has_result}
                 onClick={() => row.has_result && onPreview(row.path)}
-                className={row.has_result ? 'text-blue-700 hover:underline' : 'text-slate-700'}
+                className={row.has_result ? 'text-blue-700 hover:underline dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}
               >
                 {row.path}
               </button>
@@ -74,7 +74,7 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
             <td className="p-2">{row.pages ?? '—'}</td>
             <td className="p-2">{row.seconds != null ? row.seconds.toFixed(1) : '—'}</td>
             <td className="p-2">{row.rate ?? '—'}</td>
-            <td className="p-2 text-red-700">{row.error ?? ''}</td>
+            <td className="p-2 text-red-700 dark:text-red-400">{row.error ?? ''}</td>
             <td className="p-2">
               {row.has_result && onDownload && (
                 <button
