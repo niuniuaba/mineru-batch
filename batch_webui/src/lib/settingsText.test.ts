@@ -24,11 +24,11 @@ describe('describeChange', () => {
       ...base,
       key: 'small_backend',
       env_var: 'MINERU_MODEL_SMALL_BACKEND',
-      config_file: '/home/x/.mineru/config.yaml',
+      config_file: '/etc/mineru/config.yaml',
       effect: 'next_run',
     })
     expect(text).toContain('MINERU_MODEL_SMALL_BACKEND')
-    expect(text).toContain('/home/x/.mineru/config.yaml')
+    expect(text).toContain('/etc/mineru/config.yaml')
     expect(text).toContain('next run')
   })
 

@@ -8,10 +8,10 @@ mirrored `.md` tree on disk remains the durable artifact and `rsync` still works
 
 Run it with the venv that owns MinerU:
 
-    /home/wing/Apps/mineru/bin/python batch_api.py
+    <venv>/bin/python batch_api.py
 
-Configuration is by environment variable (see `CONFIG` below); every path defaults to the
-`/mnt/nas/media/mineru` layout the batch service uses.
+Configuration is by environment variable; see `batch_settings.py` and
+`batch.env.example`. Paths default to `$MINERU_HOME/batch`.
 """
 
 from __future__ import annotations

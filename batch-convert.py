@@ -13,7 +13,7 @@ per-file failures, and reports a rate per file so a slow tier is visible immedia
 
 Run it from the venv that owns MinerU, e.g.:
 
-    /home/wing/Apps/mineru/bin/python batch-convert.py --input ~/ee-in --output ~/ee-md
+    <venv>/bin/python batch-convert.py --input ~/ee-in --output ~/ee-md
 
 Markdown is rendered in-process, so the local models load once for the whole batch
 (see `model/runtime/hybrid.py`: the model singletons are module-level caches).
