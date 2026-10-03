@@ -1,0 +1,115 @@
+; MinerU batch conversion: a staged chunk of documents -> mirrored Markdown tree.
+;
+; Tier is basic (ONNX small models, CPU only). This host is deliberately CPU-oriented:
+; `standard` runs the VLM through llama.cpp, which offloads to the 2 GB GT 1030 via
+; Vulkan and dies with ErrorOutOfDeviceMemory on image-heavy documents, while also
+; measuring ~15x slower. Measured on basic, CPU only:
+;   39-page text-heavy PDF    94 s    ~1,494 pages/h
+;  106-page image-heavy deck 171 s    ~2,200 pages/h
+;
+; Install:
+;   sudo install -m0644 /home/wing/Apps/mineru/mineru-batch.service /etc/systemd/system/
+;   sudo systemctl daemon-reload
+;
+; Start a chunk (returns immediately, survives disconnect):
+;   sudo systemctl start mineru-batch
+;   journalctl -u mineru-batch -f          # watch progress
+;   systemctl status mineru-batch          # active (running) / failed
+;   sudo systemctl stop mineru-batch       # cancel a run
+;
+; Exit codes: 0 = all converted, 1 = some files failed (see failures.txt), 2 = bad input.
+;
+; NOT enabled at boot: started per chunk, by hand.
+;
+; For a one-off with different paths, skip this unit entirely:
+;   sudo systemd-run --unit=mineru-batch-1 --uid=wing --gid=wing -p Nice=5 \
+;     -p Environment=MINERU_HOME=/home/wing/.mineru \
+;     /home/wing/Apps/mineru/bin/python /home/wing/Apps/mineru/batch-convert.py \
+;     --input /mnt/nas/media/mineru/ee-in-2 --output /mnt/nas/media/mineru/ee-md-2 --tier basic
+
+[Unit]
+Description=MinerU batch conversion (documents -> Markdown)
+Documentation=https://opendatalab.github.io/MinerU/
+; The venv and models live on /home; inputs and outputs live on the /mnt/nas/media
+; disk. Neither may start before its filesystem is mounted.
+RequiresMountsFor=/home/wing /mnt/nas/media
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+; Type=simple, not oneshot: a chunk can run for a long time, and oneshot would either
+; block `systemctl start` or hit the default 90s TimeoutStartSec.
+Type=simple
+User=wing
+Group=wing
+WorkingDirectory=/home/wing/Apps/mineru
+
+Environment=HOME=/home/wing
+; Model weights and config live here (basic tier only: the ~819 MB ONNX repo).
+Environment=MINERU_HOME=/home/wing/.mineru
+; Without this, Python block-buffers stdout when it is not a tty and the journal stays
+; empty until the process exits, making a long run impossible to watch.
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/home/wing/Apps/mineru/bin/python /home/wing/Apps/mineru/batch-convert.py \
+    --input /mnt/nas/media/mineru/ee-in \
+    --output /mnt/nas/media/mineru/ee-md \
+    --tier basic \
+    --image-mode marker \
+    --report /mnt/nas/media/mineru/ee-md/run-report.json
+
+Restart=no
+; Inference is CPU-bound; keep the box responsive while a chunk runs.
+Nice=5
+KillMode=control-group
+
+; --- Hardening -------------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+; /usr, /boot and /etc read-only.
+ProtectSystem=full
+; ProtectHome MUST stay "no": the venv and the model weights are under /home/wing.
+ProtectHome=no
+
+; --- Resource limits -------------------------------------------------------
+MemoryMax=16G
+
+[Install]
+WantedBy=multi-user.target
+
+; ===========================================================================
+; Operating notes
+; ===========================================================================
+;
+; Chunked workflow, all initiated from the laptop (only this host runs sshd):
+;
+;   rsync -av --partial --info=progress2 ./WIP/ wing@192.168.0.102:/mnt/nas/media/mineru/ee-in/
+;   sudo systemctl start mineru-batch
+;   rsync -av wing@192.168.0.102:/mnt/nas/media/mineru/ee-md/ ./WIP-out/
+;   # then clear the input side for the next chunk:
+;   rm -rf /mnt/nas/media/mineru/ee-in/*
+;
+; Re-running is safe: a document whose .md already exists is skipped, so a chunk can be
+; resumed or extended without redoing work. Use --force to redo a specific file.
+;
+; Image mode: `marker` drops figure images and leaves a positional comment. On
+; image-dominant documents this also drops text baked into the diagrams (verified: a
+; transistor cross-section's labels were absent from the output). If your downstream LLM
+; is multimodal, change --image-mode to inline so the figures travel with the Markdown;
+; `inline` embeds each figure as a base64 data URI and makes the .md far larger.
+;
+; Storage: /mnt/nas/media is the empty 224 GB SSD (/dev/sda1, 1% used) - preferred over
+; /mnt/nas/public (281 GB spinning HDD holding personal files) because it is idle, faster,
+; and keeps input/output I/O off the disk that holds the venv and models. It is NTFS served
+; by ntfs-3g (FUSE), so writes go through a userspace driver; if that mount ever drops,
+; files fail individually and the run reports exit 1 rather than corrupting output, and a
+; re-run resumes from the files already converted. Verified on this mount: read-write as
+; wing, case-sensitive, and accepts `:` `?` `|` `*` in filenames.
+;
+; Output is CPU-bound and single-process: models load once per run and are reused for
+; every document, so a chunk of many files is much more efficient per page than
+; converting them one command at a time.

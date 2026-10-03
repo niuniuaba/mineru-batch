@@ -1,0 +1,98 @@
+; MinerU batch control plane: upload documents, start a conversion, watch progress,
+; download the resulting Markdown. Always on, so the laptop can drive it any time.
+;
+; The conversion itself is done by batch-convert.py, spawned as a child of this service;
+; this process is only the control plane (upload, status, download).
+;
+; Install and enable at boot:
+;   sudo install -m0644 /home/wing/Apps/mineru/mineru-batch-api.service /etc/systemd/system/
+;   sudo systemctl daemon-reload
+;   sudo systemctl enable --now mineru-batch-api
+;
+; Then, from the laptop:  open http://192.168.0.102:8090/
+;
+; Logs / troubleshooting:
+;   journalctl -u mineru-batch-api -f
+;   curl -s localhost:8090/api/status
+
+[Unit]
+Description=MinerU batch control plane (upload, status, download)
+Documentation=https://opendatalab.github.io/MinerU/
+; The venv and models live on /home; uploads and results live on the /mnt/nas/media disk.
+RequiresMountsFor=/home/wing /mnt/nas/media
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=wing
+Group=wing
+WorkingDirectory=/home/wing/Apps/mineru
+
+Environment=HOME=/home/wing
+Environment=MINERU_HOME=/home/wing/.mineru
+; Child stdout must not be block-buffered, or run progress never reaches the journal.
+Environment=PYTHONUNBUFFERED=1
+
+; --- control plane configuration -------------------------------------------
+Environment=MINERU_BATCH_ROOT=/mnt/nas/media/mineru
+Environment=MINERU_BATCH_TIER=basic
+Environment=MINERU_BATCH_IMAGE_MODE=marker
+Environment=MINERU_BATCH_PORT=8090
+; Uncomment to require a bearer token on every /api/ call (the page then needs the
+; matching value typed in, so leave it off for the browser UI unless you add that).
+;Environment=MINERU_BATCH_TOKEN=change-me
+
+ExecStart=/home/wing/Apps/mineru/bin/python /home/wing/Apps/mineru/batch_api.py
+
+; "Always ready": come back after a crash, and again after a reboot via [Install].
+Restart=always
+RestartSec=3
+
+; A conversion runs as a CHILD of this service, and two mechanisms keep it alive across a
+; restart of the API (KillMode=control-group, the default, would kill it):
+;   1. The child inherits the run-lock descriptor, so the lock lasts as long as the
+;      conversion. A restarted API sees the lock held, adopts the run, and refuses to
+;      start a second one over the same output tree.
+;   2. The child writes to RUN_LOG (root/run.log) instead of a pipe. A pipe would break
+;      under the child when this process died; with a file the restarted API replays the
+;      log and live per-document progress is restored rather than lost.
+KillMode=process
+
+; Inference is CPU-bound; keep the box responsive.
+Nice=5
+
+; --- Hardening -------------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+; /usr, /boot and /etc read-only.
+ProtectSystem=full
+; ProtectHome MUST stay "no": the venv and the model weights are under /home/wing.
+ProtectHome=no
+
+; --- Resource limits -------------------------------------------------------
+; Covers the API plus its conversion child.
+MemoryMax=16G
+
+[Install]
+WantedBy=multi-user.target
+
+; ===========================================================================
+; Notes
+; ===========================================================================
+;
+; Security: there is no authentication by default. Anyone who can reach this port on the
+; LAN can upload files, start a conversion, and download results. That matches the
+; existing WebUI on this host, but this endpoint also WRITES to the NAS disk, so it is
+; worth knowing. Uploads are confined to ee-in by path normalisation (absolute paths,
+; `..`, drive letters and symlink escapes are all refused) and capped per file
+; (MINERU_BATCH_MAX_UPLOAD_BYTES, default 500 MB). MINERU_BATCH_TOKEN adds a bearer-token
+; check if you want it.
+;
+; Relationship to the other units: mineru-batch.service (the headless runner) still works
+; and is unaffected; it shares the same ee-in/ee-md directories. Do not start both at the
+; same time — they would race on the same files. Use one or the other.

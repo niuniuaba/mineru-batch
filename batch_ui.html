@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MinerU batch conversion</title>
+<style>
+  :root { --line:#d8dbe0; --muted:#6b7280; --bg:#f6f7f9; --ok:#137333; --warn:#a15c00; --bad:#b3261e; --accent:#1a56db; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:20px; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:#1f2328; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:14px; margin:0 0 10px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .sub { color:var(--muted); margin:0 0 18px; }
+  .sub code { background:#e8eaee; padding:1px 5px; border-radius:4px; }
+  section { background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:26px; text-align:center; color:var(--muted); background:#fbfcfd; }
+  #drop.hot { border-color:var(--accent); background:#eef3ff; color:var(--accent); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  button { font:inherit; padding:7px 13px; border:1px solid var(--line); border-radius:7px; background:#fff; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:#b6bcc6; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.danger { color:var(--bad); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-weight:600; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .name { word-break:break-all; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid; }
+  .s-queued  { color:var(--muted); border-color:var(--line); }
+  .s-running { color:var(--accent); border-color:#b9caf5; background:#eef3ff; }
+  .s-done    { color:var(--ok); border-color:#b7dfc4; background:#eaf6ee; }
+  .s-skipped { color:var(--muted); border-color:var(--line); background:#f2f3f5; }
+  .s-failed  { color:var(--bad); border-color:#f2b8b5; background:#fdecea; }
+  .err { color:var(--bad); font-size:12px; word-break:break-word; }
+  .bar { height:5px; background:#e8eaee; border-radius:99px; overflow:hidden; margin-top:4px; }
+  .bar > i { display:block; height:100%; background:var(--accent); width:0; transition:width .2s; }
+  #summary { font-variant-numeric:tabular-nums; }
+  .muted { color:var(--muted); }
+  .scroller { max-height:340px; overflow:auto; }
+</style>
+</head>
+<body>
+
+<h1>MinerU batch conversion</h1>
+<p class="sub" id="config">connecting…</p>
+
+<section>
+  <h2>1 · Add documents</h2>
+  <div id="drop">Drop files or a folder here</div>
+  <div class="row">
+    <button id="pickFiles">Choose files…</button>
+    <button id="pickFolder">Choose folder…</button>
+    <button id="uploadBtn" class="primary" disabled>Upload</button>
+    <button id="clearQueue" title="Forget the files selected in this browser. Nothing on the server is touched." disabled>Clear selection</button>
+    <span class="muted" id="queueInfo">no files selected</span>
+  </div>
+  <input type="file" id="fileInput" multiple hidden>
+  <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+  <div id="uploadList"></div>
+</section>
+
+<section>
+  <h2>2 · Convert</h2>
+  <div class="row">
+    <button id="startBtn" class="primary">Start conversion</button>
+    <button id="stopBtn" class="danger" disabled>Stop</button>
+    <button id="clearInput" title="Delete every staged file from the server's input folder. Converted output is not affected.">Clear input folder</button>
+    <span id="summary" class="muted"></span>
+  </div>
+  <div class="row"><span id="actionMsg" class="muted"></span></div>
+  <div id="runMsg" class="muted" style="margin-top:8px"></div>
+  <div class="scroller"><table id="statusTable">
+    <thead><tr><th>Document</th><th>Status</th><th class="num">Pages</th><th class="num">Seconds</th><th class="num">Page/s</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>3 · Results</h2>
+  <div class="row">
+    <button id="refreshResults">Refresh</button>
+    <button id="downloadSelected" class="primary" disabled>Download selected</button>
+    <label class="muted"><input type="checkbox" id="selectAll"> select all</label>
+    <span id="selInfo" class="muted">nothing selected</span>
+  </div>
+  <div class="scroller"><table id="resultsTable">
+    <thead><tr><th style="width:28px"></th><th>Converted file</th><th class="num">Size</th><th class="num">Pages</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="muted" id="resultsInfo"></p>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let queue = [];          // {file, path, status, sent, total}
+let polling = null;
+let lastState = null;
+let results = [];
+
+const fmtBytes = (n) => n == null ? "" : n < 1024 ? n + " B" : n < 1048576 ? (n/1024).toFixed(1) + " KB" : (n/1048576).toFixed(1) + " MB";
+
+/* ---------- collecting files ---------- */
+
+function addToQueue(entries) {
+  const seen = new Set(queue.map(e => e.path));
+  for (const e of entries) {
+    if (!e.file || seen.has(e.path)) continue;
+    seen.add(e.path);
+    queue.push({ file: e.file, path: e.path, status: "ready", sent: 0, total: e.file.size });
+  }
+  renderQueue();
+}
+
+async function walkEntry(entry, prefix, out) {
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    out.push({ file, path: prefix + entry.name });
+    return;
+  }
+  if (!entry.isDirectory) return;
+  const reader = entry.createReader();
+  // readEntries yields batches; it must be drained until it returns an empty array.
+  for (;;) {
+    const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+    if (!batch.length) break;
+    for (const child of batch) await walkEntry(child, prefix + entry.name + "/", out);
+  }
+}
+
+async function entriesFromDrop(dt) {
+  const out = [];
+  const items = dt.items ? Array.from(dt.items).filter(i => i.kind === "file") : [];
+  if (items.length && items[0].webkitGetAsEntry) {
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry();
+      if (entry) await walkEntry(entry, "", out);
+      else { const f = item.getAsFile(); if (f) out.push({ file: f, path: f.name }); }
+    }
+    return out;
+  }
+  for (const f of Array.from(dt.files || [])) out.push({ file: f, path: f.webkitRelativePath || f.name });
+  return out;
+}
+
+/** Turn a list of File objects into {file, path}, using webkitRelativePath for folders. */
+const fromFileList = (list) => Array.from(list).map(f => ({ file: f, path: f.webkitRelativePath || f.name }));
+
+/* ---------- uploading ---------- */
+
+function uploadOne(entry, onProgress) {
+  return new Promise((resolve) => {
+    const form = new FormData();
+    form.append("files", entry.file, entry.file.name);
+    form.append("relative_paths", entry.path);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded, e.total); };
+    xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, body: xhr.responseText });
+    xhr.onerror = () => resolve({ ok: false, status: 0, body: "network error" });
+    xhr.send(form);
+  });
+}
+
+async function uploadAll() {
+  const pending = queue.filter(e => e.status !== "stored");
+  if (!pending.length) return;
+  $("uploadBtn").disabled = true;
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(3, pending.length) }, async () => {
+    while (cursor < pending.length) {
+      const entry = pending[cursor++];
+      entry.status = "uploading";
+      renderQueue();
+      const out = await uploadOne(entry, (sent, total) => { entry.sent = sent; entry.total = total; renderQueue(); });
+      entry.status = out.ok ? "stored" : "error";
+      if (!out.ok) {
+        let detail = out.body;
+        try { detail = JSON.parse(out.body).detail || detail; } catch (_) {}
+        entry.error = `HTTP ${out.status}: ${detail}`;
+      }
+      renderQueue();
+    }
+  });
+  await Promise.all(workers);
+  renderQueue();
+  refreshResults();
+}
+
+/* ---------- rendering ---------- */
+
+/* "skipped" means the document was already converted by an earlier run — from the user's
+   point of view that is simply done, so it reads as done and the detail moves to the
+   tooltip instead of the label. */
+function pill(status) {
+  const skipped = status === "skipped";
+  const span = document.createElement("span");
+  span.className = "pill s-" + (skipped ? "done" : status);
+  span.textContent = skipped ? "done" : status;
+  if (skipped) span.title = "already converted by an earlier run";
+  return span;
+}
+
+function renderQueue() {
+  const host = $("uploadList");
+  host.textContent = "";
+  if (!queue.length) { $("queueInfo").textContent = "no files selected"; $("uploadBtn").disabled = true; return; }
+  const stored = queue.filter(e => e.status === "stored").length;
+  const bytes = queue.reduce((sum, e) => sum + (e.file.size || 0), 0);
+  $("queueInfo").textContent = `${queue.length} file(s), ${fmtBytes(bytes)} · ${stored} uploaded`;
+  $("uploadBtn").disabled = stored === queue.length;
+  $("clearQueue").disabled = queue.some(e => e.status === "uploading");
+
+  const table = document.createElement("table");
+  const head = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const label of ["File", "Status", "Size"]) { const th = document.createElement("th"); th.textContent = label; hr.appendChild(th); }
+  head.appendChild(hr);
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  for (const e of queue) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.className = "name"; name.textContent = e.path;      // textContent: filenames are untrusted
+    const status = document.createElement("td");
+    status.appendChild(pill(e.status));
+    if (e.status === "uploading") {
+      const bar = document.createElement("div"); bar.className = "bar";
+      const fill = document.createElement("i");
+      fill.style.width = (e.total ? (100 * e.sent / e.total) : 0) + "%";
+      bar.appendChild(fill); status.appendChild(bar);
+    }
+    if (e.error) { const err = document.createElement("div"); err.className = "err"; err.textContent = e.error; status.appendChild(err); }
+    const size = document.createElement("td");
+    size.className = "num"; size.textContent = fmtBytes(e.file.size);
+    tr.append(name, status, size);
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  host.appendChild(table);
+}
+
+function renderStatus(payload) {
+  const cfg = payload.config || {};
+  $("config").textContent = "";
+  const line = document.createElement("span");
+  line.textContent = `tier ${cfg.tier} · image-mode ${cfg.image_mode} · in ${cfg.input_dir} · out ${cfg.output_dir}`;
+  const code = document.createElement("code");
+  code.textContent = `queued ${cfg.queued_in_input}`;
+  $("config").append(line, document.createTextNode(" · "), code);
+
+  const c = payload.counts || {};
+  const done = (c.done || 0) + (c.skipped || 0);   // skipped = already converted = done
+  $("summary").textContent = `state ${payload.state}${payload.external ? " (unattended)" : ""} · ${done} done · ${c.failed || 0} failed · ${c.queued || 0} queued`;
+  $("runMsg").textContent = [payload.current_file ? `current: ${payload.current_file}` : "", payload.window, payload.message]
+    .filter(Boolean).join("  ·  ");
+
+  $("startBtn").disabled = payload.state === "running";
+  $("stopBtn").disabled = payload.state !== "running";
+
+  const body = $("statusTable").querySelector("tbody");
+  body.textContent = "";
+  for (const f of (payload.files || [])) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td"); name.className = "name"; name.textContent = f.name;
+    const status = document.createElement("td"); status.appendChild(pill(f.status));
+    if (f.error) { const err = document.createElement("div"); err.className = "err"; err.textContent = f.error; status.appendChild(err); }
+    const pages = document.createElement("td"); pages.className = "num"; pages.textContent = f.pages ?? "";
+    const secs = document.createElement("td"); secs.className = "num"; secs.textContent = f.seconds != null ? f.seconds.toFixed(1) : "";
+    const rate = document.createElement("td"); rate.className = "num"; rate.textContent = f.rate != null ? f.rate.toFixed(2) : "";
+    tr.append(name, status, pages, secs, rate);
+    body.appendChild(tr);
+  }
+}
+
+function renderResults() {
+  const body = $("resultsTable").querySelector("tbody");
+  body.textContent = "";
+  let selectedBytes = 0, selectedCount = 0;
+  for (const doc of results) {
+    const tr = document.createElement("tr");
+    const check = document.createElement("td");
+    const box = document.createElement("input");
+    box.type = "checkbox"; box.dataset.path = doc.path; box.dataset.bytes = doc.bytes;
+    box.addEventListener("change", updateSelection);
+    check.appendChild(box);
+    const name = document.createElement("td"); name.className = "name"; name.textContent = doc.path;
+    const size = document.createElement("td"); size.className = "num"; size.textContent = fmtBytes(doc.bytes);
+    const pages = document.createElement("td"); pages.className = "num"; pages.textContent = doc.pages ?? "";
+    const link = document.createElement("td");
+    const a = document.createElement("a");
+    a.href = "/api/results/download?path=" + encodeURIComponent(doc.path);
+    a.textContent = "download";
+    link.appendChild(a);
+    tr.append(check, name, size, pages, link);
+    body.appendChild(tr);
+  }
+  const stamp = "refreshed " + new Date().toLocaleTimeString();
+  $("resultsInfo").textContent = (results.length
+    ? `${results.length} converted file(s), ${fmtBytes(results.reduce((s, d) => s + d.bytes, 0))} total`
+    : "no converted files yet") + " · " + stamp;
+  updateSelection();
+}
+
+function updateSelection() {
+  const boxes = Array.from(document.querySelectorAll("#resultsTable tbody input[type=checkbox]"));
+  const chosen = boxes.filter(b => b.checked);
+  const bytes = chosen.reduce((sum, b) => sum + Number(b.dataset.bytes || 0), 0);
+  $("selInfo").textContent = chosen.length ? `${chosen.length} selected · ${fmtBytes(bytes)}` : "nothing selected";
+  $("downloadSelected").disabled = chosen.length === 0;
+  $("selectAll").checked = boxes.length > 0 && chosen.length === boxes.length;
+}
+
+async function refreshResults() {
+  try {
+    const data = await (await fetch("/api/results")).json();
+    results = data.documents || [];
+    renderResults();
+  } catch (e) { $("resultsInfo").textContent = "could not load results: " + e; }
+}
+
+/* ---------- actions ---------- */
+
+async function downloadSelected() {
+  const paths = Array.from(document.querySelectorAll("#resultsTable tbody input[type=checkbox]:checked")).map(b => b.dataset.path);
+  if (!paths.length) return;
+  const bytes = Array.from(document.querySelectorAll("#resultsTable tbody input[type=checkbox]:checked"))
+    .reduce((s, b) => s + Number(b.dataset.bytes || 0), 0);
+  // With --image-mode inline the markdown embeds figures as base64 and can get very large.
+  if (bytes > 512 * 1024 * 1024 && !confirm(`The selection is ${fmtBytes(bytes)} before compression. Continue?`)) return;
+  $("downloadSelected").disabled = true;
+  $("selInfo").textContent = "building zip…";
+  try {
+    const response = await fetch("/api/results/zip", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths })
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "mineru-markdown.zip";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    alert("zip download failed: " + e.message);
+  } finally {
+    $("downloadSelected").disabled = false;
+    updateSelection();
+  }
+}
+
+async function post(url) {
+  const response = await fetch(url, { method: "POST" });
+  if (!response.ok) {
+    let detail = await response.text();
+    try { detail = JSON.parse(detail).detail || detail; } catch (_) {}
+    alert(detail);
+    return null;
+  }
+  return response.json();
+}
+
+/* Transient confirmation for actions that otherwise change something invisibly. */
+let actionTimer = null;
+function say(message) {
+  const host = $("actionMsg");
+  host.textContent = message;
+  clearTimeout(actionTimer);
+  actionTimer = setTimeout(() => { host.textContent = ""; }, 6000);
+}
+
+/* ---------- polling ---------- */
+
+async function poll() {
+  let payload;
+  try {
+    payload = await (await fetch("/api/status")).json();
+  } catch (e) {
+    $("runMsg").textContent = "cannot reach the service: " + e;
+  }
+  if (payload) {
+    const finished = lastState === "running" && payload.state !== "running";
+    renderStatus(payload);
+    lastState = payload.state;
+    if (finished) { refreshResults(); }
+  }
+  clearTimeout(polling);
+  polling = setTimeout(poll, (payload && payload.state === "running") ? 1500 : 4000);
+}
+
+/* ---------- wiring ---------- */
+
+$("pickFiles").addEventListener("click", () => $("fileInput").click());
+$("pickFolder").addEventListener("click", () => $("folderInput").click());
+$("fileInput").addEventListener("change", (e) => { addToQueue(fromFileList(e.target.files)); e.target.value = ""; });
+$("folderInput").addEventListener("change", (e) => { addToQueue(fromFileList(e.target.files)); e.target.value = ""; });
+$("uploadBtn").addEventListener("click", uploadAll);
+$("clearQueue").addEventListener("click", () => { queue = []; renderQueue(); });
+$("startBtn").addEventListener("click", async () => {
+  const started = await post("/api/start");
+  if (started) { say(`started: ${started.documents} document(s)`); lastState = "running"; poll(); }
+});
+$("stopBtn").addEventListener("click", async () => {
+  const stopped = await post("/api/stop");
+  if (stopped) say("stopping — documents already converted are kept");
+});
+$("clearInput").addEventListener("click", async () => {
+  const cleared = await post("/api/clear");
+  if (cleared) { say(`removed ${cleared.removed} file(s) from the input folder`); poll(); }
+});
+$("refreshResults").addEventListener("click", refreshResults);
+$("downloadSelected").addEventListener("click", downloadSelected);
+$("selectAll").addEventListener("change", (e) => {
+  document.querySelectorAll("#resultsTable tbody input[type=checkbox]").forEach(b => { b.checked = e.target.checked; });
+  updateSelection();
+});
+
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("hot"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove("hot")));
+drop.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  addToQueue(await entriesFromDrop(e.dataTransfer));
+});
+// Dropping anywhere else must not make the browser navigate away from the page.
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
+renderQueue();
+poll();
+refreshResults();
+</script>
+</body>
+</html>
