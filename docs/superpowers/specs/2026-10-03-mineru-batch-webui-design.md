@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-03
 **Status:** Approved design, ready for implementation planning
-**Repo:** `/home/wing/Apps/mineru-batch` → `github.com/niuniuaba/mineru-batch`
+**Repo:** `github.com/niuniuaba/mineru-batch` (public)
 
 ---
 
@@ -29,16 +29,16 @@ structurally single-document and cannot express this workflow:
 
 Gradio is a form library whose data model is one value per component. A
 multi-select document table, live per-file status and a settings panel would be
-fought, not used. The V1 API was already evaluated and rejected for this use in
-`~/.claude/plans/atomic-crunching-dongarra.md` on evidence (path-less output
-blobs, no resume, no mirrored tree, no run report).
+fought, not used. The V1 API was already evaluated and rejected for this use on evidence: outputs are
+path-less blobs with no server-side `.md` tree, there is no resume or
+idempotence, no mirrored input tree, and no run report.
 
 ### Why LightRAG's WebUI is the reference
 
-`/home/wing/Apps/lightrag/lightrag_webui` is the UX being copied: drag-and-drop
+LightRAG's `lightrag_webui` is the UX being copied: drag-and-drop
 that starts work immediately, a status dashboard, multi-select delete, and a
 server-parameters panel. It is a React 19 + Vite + Tailwind + Radix single-page
-app. Its FastAPI server mounts the built bundle as static files
+app, whose FastAPI server mounts the built bundle as static files
 (`lightrag/api/lightrag_server.py:410,1154`) — the same serving pattern adopted
 here.
 
@@ -71,10 +71,11 @@ hundred files.
 - **Images in the converted Markdown.** The output feeds LLM/RAG pipelines;
   embedded images inflate the token bill. Default stays `--image-mode marker`.
   See §7.4.
-- **A VLM fallback tier.** On this host `standard`/`advanced` run the VLM through
-  llama.cpp on a 2 GB GT 1030, which per `mineru-batch.service`'s own notes
-  *"dies with ErrorOutOfDeviceMemory on image-heavy documents, while also
-  measuring ~15x slower."* Not offerable as a UI action (§7.4).
+- **A VLM fallback tier.** On the deployment host, `standard`/`advanced` run the
+  VLM through llama.cpp on a 2 GB consumer GPU, which the service's own
+  operational notes record as failing with `ErrorOutOfDeviceMemory` on
+  image-heavy documents, at roughly 15x slower throughput. Not offerable as a UI
+  action (§7.4).
 - **Editing server parameters from the browser.** Shown, not edited (§6.4).
 - Rich HTML / layout-box / page-image preview (that is the Gradio app's job).
 - i18n, dark-mode theming, pagination, per-run tier or image-mode overrides.
@@ -97,14 +98,15 @@ hundred files.
 - Run survival is deliberate: an flock passed to the child, and a run log on
   disk rather than a pipe, so a restarted API adopts an in-flight run
   (`:390-412`).
-- Inputs and outputs live on the NAS at `/mnt/nas/media/mineru/{ee-in,ee-md}`.
+- Inputs and outputs live under `$MINERU_HOME/batch/` (`ee-in` and `ee-md`) —
+  the same home that holds MinerU's config, models, logs and doclib.
 
 ### Services
 
 - `mineru-webui` — **active** on `:7860`, `--api-server-tier basic`, spawns a
   managed V1 child on loopback. Unaffected by this work.
 - `mineru-batch-api` / `mineru-batch` — unit files exist in
-  `/home/wing/Apps/mineru/` but are **not installed** (`systemctl is-enabled`
+  the working tree but are **not installed** (`systemctl is-enabled`
   reports `not-found`). Nothing is running from a unit; `:8090` is closed.
 
 ### Toolchain
@@ -132,9 +134,9 @@ pytest and no test runner** (documented in the installed-package `CLAUDE.md`).
 
 | # | Thing | Home | Role |
 |---|-------|------|------|
-| 1 | Upstream MinerU source | `/home/wing/Apps/mineru.git` | clone of `opendatalab/MinerU`; holds the gradio patch branch and `patches/` |
-| 2 | Installed MinerU package | `.../site-packages/mineru/` | a *deployment artifact*, replaced by any reinstall |
-| 3 | **Batch tooling (this work)** | `/home/wing/Apps/mineru-batch/` | the control plane, the runner, the service units, the web console |
+| 1 | Upstream MinerU source | a separate clone of `opendatalab/MinerU` | holds the local patch branch and `patches/` |
+| 2 | Installed MinerU package | `site-packages/mineru/` in the virtualenv | a *deployment artifact*, replaced by any reinstall |
+| 3 | **Batch tooling (this work)** | this repository | the control plane, the runner, the service units, the web console |
 
 The only edge is at runtime: (3) does `import mineru`, resolving to (2). This
 work never writes to (1) or (2), so no upgrade can destroy it.
@@ -148,7 +150,7 @@ deliberately left as a separate future decision.
 ### 4.2 Topology
 
 ```
-.138 browser ──HTTP──> .102:8090  mineru-batch-api  (FastAPI/uvicorn, systemd)
+browser ──HTTP──>  host:8090  mineru-batch-api  (FastAPI/uvicorn, systemd)
                           │  GET  /                      serves the built SPA
                           │  GET  /api/status            run state + server params
                           │  GET  /api/documents         merged document table
@@ -161,7 +163,7 @@ deliberately left as a separate future decision.
                           │  GET  /api/results/content   one .md, inline (preview)
                           │  POST /api/results/zip       selected .md files as a zip
                           ▼
-                    /mnt/nas/media/mineru/ee-in ──> batch-convert.py ──> ee-md (mirrored .md tree)
+                $MINERU_HOME/batch/ee-in ──> batch-convert.py ──> ee-md (mirrored .md tree)
 ```
 
 One process, one port, `0.0.0.0:8090` (already the default). Same-origin, so no
@@ -170,8 +172,8 @@ CORS.
 ### 4.3 Build and serve
 
 ```
-/home/wing/Apps/mineru-batch/batch_webui/        source (React 19 + TS + Vite + Tailwind + Radix + axios)
-/home/wing/Apps/mineru-batch/batch_webui/dist/   build output (generated, gitignored)
+batch_webui/        source (React 19 + TS + Vite + Tailwind + Radix + axios)
+batch_webui/dist/   build output (generated, gitignored)
 ```
 
 `bun install && bun run build` produces `dist/`. `batch_api.py` mounts it last:
@@ -190,13 +192,13 @@ Dev loop: `bun run dev` on `:5173` with a Vite proxy for `/api` →
 ### 4.4 Boundaries
 
 The SPA is a pure HTTP client. It never imports MinerU, never invokes
-`batch-convert.py`, and never touches NAS paths directly. `batch_api.py` remains
+`batch-convert.py`, and never touches storage paths directly. `batch_api.py` remains
 the control plane; `batch-convert.py` remains the engine.
 
 ### 4.5 Authentication
 
 Inherits `MINERU_BATCH_TOKEN` as-is: **unset by default**, so the console is
-open to anyone on the LAN who can reach `:8090` and it writes to the NAS. If a
+open to anyone on the LAN who can reach `:8090` and it writes to disk. If a
 token is ever set, the SPA needs a token field persisted in `localStorage`.
 
 ---
@@ -273,7 +275,7 @@ Two groups:
 | port | `MINERU_BATCH_PORT` | `8090` |
 | tier | `MINERU_BATCH_TIER` | `basic` |
 | image mode | `MINERU_BATCH_IMAGE_MODE` | `marker` |
-| root | `MINERU_BATCH_ROOT` | `/mnt/nas/media/mineru` |
+| root | `MINERU_BATCH_ROOT` | `$MINERU_HOME/batch` |
 | max upload bytes | `MINERU_BATCH_MAX_UPLOAD_BYTES` | 524288000 |
 | auth | `MINERU_BATCH_TOKEN` | unset → LAN-open |
 
@@ -295,7 +297,7 @@ live `state`, `pid`, `started_at`, `queued_in_input`.
 
 **Read-only.** The panel shows value, source, the knob to turn, and when the
 change takes effect. Editing is out of scope: this endpoint is unauthenticated
-on the LAN by default and already writes to the NAS; a web form that rewrote the
+on the LAN by default and already writes to disk; a web form that rewrote the
 model backend would raise the blast radius, and would create a second source of
 truth competing with systemd for the same parameters. If ever wanted, it belongs
 behind `MINERU_BATCH_TOKEN`.
@@ -451,10 +453,11 @@ images are a direct token cost. `marker` is therefore the default and stays the
 default.
 
 The natural escape hatch — "run it again with a stronger model to get the
-figures" — is not available on this host. `standard`/`advanced` drive the VLM
-through llama.cpp on a 2 GB GT 1030, which the batch service's own notes record
-as failing with `ErrorOutOfDeviceMemory` on image-heavy documents at ~15x
-slower throughput. It is an off-box or future path, not a button.
+figures" — is not available on the deployment host. `standard`/`advanced` drive
+the VLM through llama.cpp on a 2 GB consumer GPU, which the service's own
+operational notes record as failing with `ErrorOutOfDeviceMemory` on image-heavy
+documents at roughly 15x slower throughput. It is an off-box or future path, not
+a button.
 
 ### 7.5 Not a git-tracked problem anymore
 
@@ -504,7 +507,7 @@ handling, and the auto-start latch.
 
 ### 9.1 Repository
 
-`/home/wing/Apps/mineru-batch/`, a git repository with its remote at
+This repository, public, with its remote at
 **`github.com/niuniuaba/mineru-batch`** (`origin`). Contains:
 
 - `batch_api.py`, `batch-convert.py`, `batch_ui.html` (fallback)
@@ -513,11 +516,18 @@ handling, and the auto-start latch.
 - `docs/superpowers/specs/`
 - `.gitignore`: `node_modules/`, `dist/`, `__pycache__/`, `*.pyc`
 
+Because the repository is **public**, it carries no site specifics. The service
+units are committed with generic values, and a deployment's real paths, bind
+address and hardware are supplied through an uncommitted environment file. This
+is also why §7.4 speaks of "a 2 GB consumer GPU" rather than naming the card.
+
 ### 9.2 Migration
 
 Move the files; update `ExecStart=` and `WorkingDirectory=` in both units.
 `MINERU_BATCH_RUNNER` defaults relative to `__file__`, so it follows. The
-interpreter stays `/home/wing/Apps/mineru/bin/python`. Low risk: no unit is
+interpreter stays the project's virtualenv. Storage moves from the external disk
+to `$MINERU_HOME/batch`, so the units drop the `RequiresMountsFor=` for that
+mount and `MINERU_BATCH_ROOT` takes its new default. Low risk: no unit is
 currently installed (`is-enabled` → `not-found`).
 
 ### 9.3 Build and deploy
@@ -565,9 +575,7 @@ plan should preserve that order so each phase ends somewhere testable.
 
 ## 11. References
 
-- `~/.claude/plans/atomic-crunching-dongarra.md` — the plan that produced
-  `batch_api.py`, and its evidence for rejecting the V1 API
-- `/home/wing/Apps/lightrag/lightrag_webui` — the UX reference
+- LightRAG's `lightrag_webui` — the UX reference
 - `mineru/kit/gradio/app.py:406-410`, `kit/gradio/client.py:150-160` — why the
   stock WebUI was rejected
 - `mineru/parser/api_server.py:83,475` — V1's ≤100-file jobs, evaluated and
