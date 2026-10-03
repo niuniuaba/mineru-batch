@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import importlib.metadata
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -227,6 +229,80 @@ def _input_suffix(relative: str) -> str:
         if _stem(candidate) == stem:
             return Path(candidate).suffix
     return ""
+
+
+def _config_records() -> list[dict[str, Any]]:
+    """Server-declared parameters: the value, where it came from, and how to change it.
+
+    Each record carries enough for the console to explain the change without hard-coding
+    any knowledge of this service, so the panel cannot drift from the server. The token's
+    value is never included — only whether one is required.
+    """
+    import mineru.config as mineru_config
+    from mineru.model.runtime.device import get_device, resolve_small_model_backend
+
+    settings = get_settings()
+
+    def record(
+        key: str,
+        label: str,
+        value: Any,
+        *,
+        env_var: str | None = None,
+        source: str = "env",
+        config_file: str | None = None,
+        effect: str = "restart",
+    ) -> dict[str, Any]:
+        return {
+            "key": key,
+            "label": label,
+            "value": value,
+            "source": source,
+            "env_var": env_var,
+            "config_file": config_file,
+            "effect": effect,
+        }
+
+    config_path = mineru_config.get_config_file_path() if mineru_config.get_config_file_exists() else None
+    model_config = mineru_config.config.model
+
+    def mineru_record(key: str, label: str, path: str, env_var: str, value: Any) -> dict[str, Any]:
+        return record(
+            key,
+            label,
+            value,
+            env_var=env_var,
+            source=mineru_config.get_config_source(path),
+            config_file=config_path,
+            effect="next_run",
+        )
+
+    return [
+        record("tier", "Parse tier", settings.tier, env_var="MINERU_BATCH_TIER"),
+        record("image_mode", "Image mode", settings.image_mode, env_var="MINERU_BATCH_IMAGE_MODE"),
+        record("host", "Bind host", settings.host, env_var="MINERU_BATCH_HOST"),
+        record("port", "Bind port", settings.port, env_var="MINERU_BATCH_PORT"),
+        record("root", "Storage root", str(settings.root), env_var="MINERU_BATCH_ROOT"),
+        record("max_upload_bytes", "Max upload bytes", settings.max_upload_bytes, env_var="MINERU_BATCH_MAX_UPLOAD_BYTES"),
+        record("token_required", "Authentication", bool(settings.token), env_var="MINERU_BATCH_TOKEN"),
+        mineru_record(
+            "small_backend",
+            "Small model backend",
+            "model.small_backend",
+            "MINERU_MODEL_SMALL_BACKEND",
+            resolve_small_model_backend(model_config.small_backend),
+        ),
+        mineru_record(
+            "vlm_engine", "VLM engine", "model.vlm.engine", "MINERU_MODEL_VLM_ENGINE", model_config.vlm.engine
+        ),
+        record(
+            "mineru_home",
+            "MinerU home",
+            os.environ.get("MINERU_HOME", str(Path.home() / ".mineru")),
+            env_var="MINERU_HOME",
+        ),
+        record("device", "Device", get_device(), env_var="MINERU_DEVICE_MODE", effect="read_only"),
+    ]
 
 
 def _result_index() -> dict[str, dict[str, Any]]:
@@ -530,12 +606,22 @@ async def index() -> FileResponse:
 @app.get("/api/status")
 async def api_status() -> dict[str, Any]:
     payload = state.summary()
+    settings = get_settings()
+    records = _config_records()
+    by_key = {record["key"]: record["value"] for record in records}
+    usage = shutil.disk_usage(settings.root if settings.root.exists() else settings.root.parent)
     payload["config"] = {
-        "tier": get_settings().tier,
-        "image_mode": get_settings().image_mode,
-        "input_dir": str(get_settings().input_dir),
-        "output_dir": str(get_settings().output_dir),
+        "records": records,
+        "input_dir": str(settings.input_dir),
+        "output_dir": str(settings.output_dir),
         "queued_in_input": len(_input_documents()),
+        "environment": {
+            "mineru_version": importlib.metadata.version("mineru"),
+            "python": sys.version.split()[0],
+            "device": by_key["device"],
+            "resolved_small_backend": by_key["small_backend"],
+        },
+        "disk": {"free": usage.free, "total": usage.total},
     }
     return payload
 
