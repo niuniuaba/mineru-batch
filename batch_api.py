@@ -205,6 +205,97 @@ def _input_documents() -> list[str]:
     return found
 
 
+def _stem(relative: str) -> str:
+    """A document's identity: its path with the extension dropped.
+
+    A row is named after its converted file (`a.md`) while its input keeps the original
+    suffix (`a.pdf`), so matching on the stem is what makes those one document instead
+    of two unrelated rows.
+    """
+    return PurePosixPath(relative).with_suffix("").as_posix()
+
+
+def _result_index() -> dict[str, dict[str, Any]]:
+    """Converted documents keyed by their path inside ee-md, joined with the run report."""
+    settings = get_settings()
+    metadata: dict[str, dict[str, Any]] = {}
+    if settings.report.is_file():
+        try:
+            for entry in json.loads(settings.report.read_text(encoding="utf-8")).get("entries", []):
+                output = Path(entry.get("output", ""))
+                try:
+                    key = output.relative_to(settings.output_dir).as_posix()
+                except ValueError:
+                    continue
+                metadata[key] = entry
+        except (OSError, ValueError):
+            pass
+
+    results: dict[str, dict[str, Any]] = {}
+    if not settings.output_dir.is_dir():
+        return results
+    for path in settings.output_dir.rglob("*.md"):
+        if not path.is_file():
+            continue
+        key = path.relative_to(settings.output_dir).as_posix()
+        info = metadata.get(key, {})
+        results[key] = {
+            "bytes": path.stat().st_size,
+            "pages": info.get("pages"),
+            "seconds": info.get("seconds"),
+        }
+    return results
+
+
+def _blank_row(relative: str) -> dict[str, Any]:
+    return {
+        "path": relative,
+        "status": "pending",
+        "pages": None,
+        "seconds": None,
+        "rate": None,
+        "bytes": None,
+        "error": None,
+        "has_input": False,
+        "has_result": False,
+    }
+
+
+def _document_rows() -> list[dict[str, Any]]:
+    """One row per document, merged from the live run, the results tree, and ee-in."""
+    rows: dict[str, dict[str, Any]] = {}
+
+    for relative in _input_documents():
+        row = _blank_row(relative)
+        row["has_input"] = True
+        rows.setdefault(_stem(relative), row)
+
+    for relative, info in _result_index().items():
+        stem = _stem(relative)
+        row = rows.get(stem) or _blank_row(relative)
+        row["path"] = relative
+        row["has_result"] = True
+        row["bytes"] = info["bytes"]
+        if row["status"] == "pending":
+            row["status"] = "converted"
+        if info["pages"] is not None:
+            row["pages"] = info["pages"]
+        if info["seconds"] is not None:
+            row["seconds"] = info["seconds"]
+            if info["pages"]:
+                row["rate"] = round(info["pages"] / info["seconds"], 2)
+        rows[stem] = row
+
+    if state.state == "running":
+        for relative, live in state.files.items():
+            stem = _stem(relative)
+            row = rows.get(stem) or _blank_row(relative)
+            row.update({key: value for key, value in live.items() if key != "name"})
+            rows[stem] = row
+
+    return sorted(rows.values(), key=lambda row: row["path"])
+
+
 def _handle_line(line: str) -> None:
     """Translate one runner/MinerU output line into a state update."""
     line = line.strip()
@@ -428,6 +519,16 @@ async def api_status() -> dict[str, Any]:
         "queued_in_input": len(_input_documents()),
     }
     return payload
+
+
+@app.get("/api/documents")
+async def api_documents() -> dict[str, Any]:
+    """Every document, merged from the live run, ee-md and ee-in."""
+    rows = _document_rows()
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["status"]] = counts.get(row["status"], 0) + 1
+    return {"state": state.state, "counts": counts, "files": rows}
 
 
 @app.post("/api/upload")
