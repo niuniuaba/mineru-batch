@@ -58,11 +58,29 @@ def test_download_round_trips_the_same_names(api: TestClient, tmp_path: Path, na
     assert response.text == "# ok"
 
 
-def test_root_serves_the_fallback_when_no_build_exists(api: TestClient) -> None:
-    """dist/ is gitignored, so an unbuilt deploy must degrade, not 500."""
-    response = api.get("/")
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
+def test_root_falls_back_when_no_build_exists(api: TestClient, tmp_path: Path) -> None:
+    """dist/ is gitignored, so an unbuilt deploy must degrade to the single-file UI, not 500."""
+    import dataclasses
+
+    import batch_settings
+
+    pinned = dataclasses.replace(batch_settings.get_settings(), ui_dist=tmp_path / "no-such-dist")
+    batch_settings.reset_settings(pinned)
+    try:
+        response = api.get("/")
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert response.text  # the fallback page, not an empty body
+    finally:
+        batch_settings.reset_settings()
+
+
+def test_root_serves_the_built_console_when_present(api: TestClient) -> None:
+    import batch_settings
+
+    if not (batch_settings.get_settings().ui_dist / "index.html").is_file():
+        pytest.skip("console not built")
+    assert "MinerU Batch Console" in api.get("/").text
 
 
 def test_zip_preserves_relative_paths(api: TestClient, tmp_path: Path) -> None:
