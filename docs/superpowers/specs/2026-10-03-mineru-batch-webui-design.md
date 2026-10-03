@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-03
 **Status:** Approved design, ready for implementation planning
-**Repo:** `/home/wing/Apps/mineru-batch` (new, local-only)
+**Repo:** `/home/wing/Apps/mineru-batch` → `github.com/niuniuaba/mineru-batch`
 
 ---
 
@@ -54,8 +54,12 @@ hundred files.
 
 ### Goals
 
-1. Drop one file or many files or a whole folder → conversion starts
-   automatically. No "upload" button followed by a "start" button.
+1. Add documents by dropping files or a whole folder anywhere on the page, or
+   via an explicit **Upload** button — either way, conversion starts
+   automatically. There is no separate "start" step: adding documents and
+   running them is one action. (The objection is to the two-step ceremony, not
+   to an upload affordance; the button is the discoverable path for people who
+   do not drag.)
 2. A dashboard listing every document with its status, filterable by state.
 3. Click a row to preview the converted Markdown in-app.
 4. Multi-select delete, and download (single file, or selected as a zip).
@@ -326,12 +330,13 @@ src/
     useDocuments.ts       polls /api/documents + /api/status; optimistic delete
     useAutoStart.ts       the upload→start chain and the start-on-idle latch
   components/
-    DropZone.tsx          drag-drop + multi-select + folder
+    DropZone.tsx          drag-drop + Upload button (files / folder)
     RunStatusBar.tsx      state chip, counts, current file, within-file window, Stop / Clear
     FilterTabs.tsx        All · Pending · Running · Converted · Failed
     DocumentsTable.tsx    rows, multi-select, per-row actions
     PreviewDrawer.tsx     rendered Markdown
     SettingsPanel.tsx     two groups, from server-declared records
+    ServerIndicator.tsx   fixed bottom-right connection dot (§6.6)
     ConfirmDialog.tsx     delete / clear
     ui/                   Radix wrappers: button, dialog, checkbox, badge, progress, table, tabs
 ```
@@ -349,12 +354,14 @@ rendered as a muted variant carrying an "already existed" tooltip.
 
 ### 6.3 Flows
 
-**Drop → convert.** `DataTransferItem.webkitGetAsEntry` for dragged folders,
-`<input multiple>`, and `<input webkitdirectory>` (using
-`webkitRelativePath`) — the approach already proven in `batch_ui.html`. On drop:
-`POST /api/upload` (multipart with `relative_paths`) → `POST /api/start`. Upload
-progress from `onUploadProgress`. On `409` the run bar shows *"N documents
-queued behind the running job"* and the latch is armed.
+**Add → convert.** Three entry points, all ending in the same chain:
+`DataTransferItem.webkitGetAsEntry` for dragged files and folders,
+`<input multiple>` for the **Upload** button, and `<input webkitdirectory>` for
+its folder variant (using `webkitRelativePath`) — the approach already proven in
+`batch_ui.html`. Whatever the source: `POST /api/upload` (multipart with
+`relative_paths`) → `POST /api/start`. Upload progress from
+`onUploadProgress`. On `409` the run bar shows *"N documents queued behind the
+running job"* and the latch is armed.
 
 **Preview.** Row click → `GET /api/results/content?path=` → rendered Markdown in
 a side drawer, with Download / Copy / raw affordances. Only enabled when
@@ -382,8 +389,29 @@ the text-only default dropped, with no engine change.
 
 No silent failures. Per-row `failed` carries the runner's message; run-level
 failure shows `state.message` (already produced by `batch_api.py`); `413` →
-"exceeds the 500 MB limit"; `400` → path rejected; an unreachable server shows a
-backoff banner rather than a dead spinner.
+"exceeds the 500 MB limit"; `400` → path rejected. A lost connection shows in
+the indicator (§6.6) and, when a request actually fails, as an inline retry
+banner rather than a dead spinner.
+
+### 6.6 Server connection indicator
+
+A persistent health indicator in the bottom-right corner, mirroring LightRAG's
+`StatusIndicator` (`fixed right-4 bottom-4`):
+
+- a small dot — green when the server answers, red when it does not
+- a short label: **Connected** / **Disconnected**
+- a brief scale/glow animation on each state change, so a transition is noticed
+  without staring at it
+- clicking it opens a details dialog: base URL, last successful check, round-trip
+  latency, `mineru_version`, and the run `state` from `/api/status`
+
+It is fed by the existing status poll — no extra endpoint, and no second timer
+competing with the documents poll. Because `/api/status` is already the
+healthiest possible probe (it reads the run state and the input tree), a
+successful poll *is* the health signal; a failed one flips the dot to red and
+starts the backoff. The indicator is the always-visible answer to "is this thing
+even alive", which matters on a service that is unauthenticated and may be
+reached over a flaky LAN.
 
 ---
 
@@ -470,7 +498,8 @@ handling, and the auto-start latch.
 
 ### 9.1 Repository
 
-`/home/wing/Apps/mineru-batch/`, `git init`, local-only to begin. Contains:
+`/home/wing/Apps/mineru-batch/`, a git repository with its remote at
+**`github.com/niuniuaba/mineru-batch`** (`origin`). Contains:
 
 - `batch_api.py`, `batch-convert.py`, `batch_ui.html` (fallback)
 - `mineru-batch-api.service`, `mineru-batch.service`
@@ -492,7 +521,8 @@ currently installed (`is-enabled` → `not-found`).
 
 ### 9.4 Acceptance checks
 
-1. Drop one file → conversion starts with no further clicks.
+1. Drop one file → conversion starts with no further clicks; the same through the
+   Upload button, once with a multi-select and once with a folder.
 2. Click the row → Markdown renders, formulas included.
 3. Download the result; download a multi-select as a zip.
 4. Drop a folder → second run appends; relative paths preserved.
@@ -500,7 +530,8 @@ currently installed (`is-enabled` → `not-found`).
 6. Settings panel shows real values, their sources, the knob to change each, and
    when the change takes effect.
 7. Kill the API mid-run, restart it → the run is adopted and progress restored.
-8. Backend pytest suite green.
+8. Stop the API → the bottom-right indicator turns red; start it → green again.
+9. Backend pytest suite green.
 
 ### 9.5 Suggested phasing
 
@@ -520,7 +551,6 @@ plan should preserve that order so each phase ends somewhere testable.
 
 ## 10. Open items
 
-- Repo remote: local-only for now; GitHub remote is a later decision.
 - Editable install of MinerU from the clone: deliberately deferred (§4.1).
 - Config editing from the browser: deliberately deferred, token-gated if ever
   (§5.4).
