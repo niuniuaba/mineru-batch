@@ -6,11 +6,12 @@ import { FilterTabs } from './components/FilterTabs'
 import { PreviewDrawer } from './components/PreviewDrawer'
 import { RunStatusBar } from './components/RunStatusBar'
 import { SelectionActions } from './components/SelectionActions'
+import { ServerIndicator } from './components/ServerIndicator'
 import { useBatchApi } from './hooks/useBatchApi'
 import { matchesBucket, type Bucket } from './lib/buckets'
 
 export default function App() {
-  const { status, documents, error, notice, busy, submit, stop, clear, remove } = useBatchApi()
+  const { status, documents, error, notice, connected, busy, submit, stop, clear, remove } = useBatchApi()
   const [bucket, setBucket] = useState<Bucket>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [previewing, setPreviewing] = useState<string | null>(null)
@@ -71,6 +72,7 @@ export default function App() {
           }
         }}
       />
+      <ServerIndicator connected={connected} status={status} />
     </main>
   )
 }
