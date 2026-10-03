@@ -29,8 +29,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 # Reuse the runner's own definitions of "parseable" and "Office lock file" so the queue we
@@ -503,9 +504,14 @@ async def check_token(request: Request, call_next):
 
 @app.get("/")
 async def index() -> FileResponse:
-    if not get_settings().ui_fallback.is_file():
-        raise HTTPException(status_code=500, detail=f"missing {get_settings().ui_fallback.name}")
-    return FileResponse(get_settings().ui_fallback, media_type="text/html")
+    """Serve the built console; fall back to the single-file UI when it is absent."""
+    settings = get_settings()
+    built = settings.ui_dist / "index.html"
+    if built.is_file():
+        return FileResponse(built, media_type="text/html")
+    if not settings.ui_fallback.is_file():
+        raise HTTPException(status_code=500, detail="no console build and no fallback UI")
+    return FileResponse(settings.ui_fallback, media_type="text/html")
 
 
 @app.get("/api/status")
@@ -687,6 +693,15 @@ async def api_results() -> dict[str, Any]:
     return {"documents": documents, "count": len(documents), "total_bytes": sum(d["bytes"] for d in documents)}
 
 
+@app.get("/api/results/content")
+async def api_result_content(path: str) -> Response:
+    """One converted document, inline, for in-app preview."""
+    target = _resolve_within(get_settings().output_dir, path)
+    if target.suffix.lower() != ".md" or not target.is_file():
+        raise HTTPException(status_code=404, detail=f"not a converted markdown file: {path}")
+    return Response(content=target.read_text(encoding="utf-8"), media_type="text/markdown; charset=utf-8")
+
+
 @app.get("/api/results/download")
 async def api_download(path: str) -> FileResponse:
     target = _resolve_within(get_settings().output_dir, path)
@@ -728,6 +743,20 @@ async def api_zip(request: Request) -> FileResponse:
         filename=name,
         background=BackgroundTask(lambda: Path(temp_path).unlink(missing_ok=True)),
     )
+
+
+def _mount_console(application: FastAPI) -> None:
+    """Mount built assets under `/assets`, last, so `/api/*` routes keep precedence.
+
+    Serving only the hashed asset directory — rather than mounting the whole build at `/`
+    — keeps the fallback path working and leaves room for future routes.
+    """
+    assets = get_settings().ui_dist / "assets"
+    if assets.is_dir():
+        application.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+
+_mount_console(app)
 
 
 def main() -> None:
