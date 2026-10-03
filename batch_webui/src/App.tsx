@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { DocumentsTable } from './components/DocumentsTable'
 import { DropZone } from './components/DropZone'
 import { FilterTabs } from './components/FilterTabs'
@@ -13,6 +14,7 @@ export default function App() {
   const [bucket, setBucket] = useState<Bucket>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [previewing, setPreviewing] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<null | 'delete' | 'clear'>(null)
 
   const rows = useMemo(
     () => (documents?.files ?? []).filter((row) => matchesBucket(row, bucket)),
@@ -37,10 +39,7 @@ export default function App() {
       <FilterTabs value={bucket} counts={documents?.counts ?? {}} onChange={setBucket} />
       <SelectionActions
         selected={[...selected]}
-        onDelete={() => {
-          void remove([...selected])
-          setSelected(new Set())
-        }}
+        onDelete={() => setConfirming('delete')}
         onClearSelection={() => setSelected(new Set())}
       />
       <DocumentsTable
@@ -51,6 +50,27 @@ export default function App() {
         onPreview={setPreviewing}
       />
       <PreviewDrawer path={previewing} onClose={() => setPreviewing(null)} />
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming === 'clear' ? 'Clear the input directory?' : `Delete ${selected.size} document(s)?`}
+        body={
+          confirming === 'clear'
+            ? 'Every file in the input directory is removed. Converted Markdown is kept.'
+            : 'The input file and its converted Markdown are both removed. This cannot be undone.'
+        }
+        confirmLabel={confirming === 'clear' ? 'Clear input' : 'Delete'}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          const action = confirming
+          setConfirming(null)
+          if (action === 'clear') {
+            void clear()
+          } else {
+            void remove([...selected])
+            setSelected(new Set())
+          }
+        }}
+      />
     </main>
   )
 }
