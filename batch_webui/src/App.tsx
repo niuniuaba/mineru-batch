@@ -4,11 +4,12 @@ import { DropZone } from './components/DropZone'
 import { FilterTabs } from './components/FilterTabs'
 import { PreviewDrawer } from './components/PreviewDrawer'
 import { RunStatusBar } from './components/RunStatusBar'
+import { SelectionActions } from './components/SelectionActions'
 import { useBatchApi } from './hooks/useBatchApi'
 import { matchesBucket, type Bucket } from './lib/buckets'
 
 export default function App() {
-  const { status, documents, error, notice, busy, submit, stop, clear } = useBatchApi()
+  const { status, documents, error, notice, busy, submit, stop, clear, remove } = useBatchApi()
   const [bucket, setBucket] = useState<Bucket>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [previewing, setPreviewing] = useState<string | null>(null)
@@ -34,6 +35,14 @@ export default function App() {
       {notice && <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">{notice}</div>}
       <RunStatusBar status={status} onStop={stop} onClear={clear} />
       <FilterTabs value={bucket} counts={documents?.counts ?? {}} onChange={setBucket} />
+      <SelectionActions
+        selected={[...selected]}
+        onDelete={() => {
+          void remove([...selected])
+          setSelected(new Set())
+        }}
+        onClearSelection={() => setSelected(new Set())}
+      />
       <DocumentsTable
         rows={rows}
         selected={selected}
