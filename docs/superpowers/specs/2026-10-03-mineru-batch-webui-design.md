@@ -55,11 +55,11 @@ hundred files.
 ### Goals
 
 1. Add documents by dropping files or a whole folder anywhere on the page, or
-   via an explicit **Upload** button — either way, conversion starts
-   automatically. There is no separate "start" step: adding documents and
-   running them is one action. (The objection is to the two-step ceremony, not
-   to an upload affordance; the button is the discoverable path for people who
-   do not drag.)
+   via an explicit **Upload** button that opens the system file picker (files,
+   or a directory). Both are merely ways of *choosing* documents; choosing them
+   is what starts the conversion. There is no "Start" control anywhere in the
+   console. The objection is to the two-step ceremony, not to an upload
+   affordance — and users who dislike drag-and-drop deserve a button.
 2. A dashboard listing every document with its status, filterable by state.
 3. Click a row to preview the converted Markdown in-app.
 4. Multi-select delete, and download (single file, or selected as a zip).
@@ -354,14 +354,20 @@ rendered as a muted variant carrying an "already existed" tooltip.
 
 ### 6.3 Flows
 
-**Add → convert.** Three entry points, all ending in the same chain:
-`DataTransferItem.webkitGetAsEntry` for dragged files and folders,
-`<input multiple>` for the **Upload** button, and `<input webkitdirectory>` for
-its folder variant (using `webkitRelativePath`) — the approach already proven in
-`batch_ui.html`. Whatever the source: `POST /api/upload` (multipart with
-`relative_paths`) → `POST /api/start`. Upload progress from
-`onUploadProgress`. On `409` the run bar shows *"N documents queued behind the
-running job"* and the latch is armed.
+**Add → convert.** Two affordances, one chain. Neither is a convert command:
+*choosing* documents is what enqueues and starts them.
+
+- **Drag-and-drop** — `DataTransferItem.webkitGetAsEntry`, which walks dropped
+  files *and* folders and yields relative paths.
+- **Upload button** — opens the system picker. The web platform needs two
+  distinct inputs for this, so the button offers a **Files / Folder** choice:
+  `<input multiple>` for files, `<input webkitdirectory>` for a directory
+  (whose `webkitRelativePath` supplies the tree for free).
+
+Both were proven in `batch_ui.html`. Either route then runs:
+`POST /api/upload` (multipart with `relative_paths`) → `POST /api/start`.
+Upload progress from `onUploadProgress`. On `409` the run bar shows *"N
+documents queued behind the running job"* and the start-on-idle latch is armed.
 
 **Preview.** Row click → `GET /api/results/content?path=` → rendered Markdown in
 a side drawer, with Download / Copy / raw affordances. Only enabled when
