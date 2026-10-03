@@ -1,0 +1,28 @@
+import { BUCKETS, type Bucket } from '../lib/buckets'
+
+interface Props {
+  value: Bucket
+  counts: Record<string, number>
+  onChange: (bucket: Bucket) => void
+}
+
+export function FilterTabs({ value, counts, onChange }: Props) {
+  return (
+    <div role="tablist" className="flex flex-wrap gap-1">
+      {BUCKETS.map((bucket) => (
+        <button
+          key={bucket}
+          role="tab"
+          aria-selected={value === bucket}
+          onClick={() => onChange(bucket)}
+          className={`rounded px-3 py-1 text-sm capitalize ${
+            value === bucket ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+          }`}
+        >
+          {bucket}
+          {bucket !== 'all' && counts[bucket] != null ? ` (${counts[bucket]})` : ''}
+        </button>
+      ))}
+    </div>
+  )
+}
