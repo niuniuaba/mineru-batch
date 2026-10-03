@@ -1,29 +1,40 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { downloadBlob } from './download'
 
 describe('downloadBlob', () => {
-  it('saves the blob through an object URL and revokes it', async () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('attaches the anchor, saves, and revokes the URL well after the hand-off', () => {
+    vi.useFakeTimers()
     const createObjectURL = vi.fn(() => 'blob:xyz')
     const revokeObjectURL = vi.fn()
     vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
 
-    const click = vi.fn()
-    const anchor = { href: '', download: '', click }
-    vi.spyOn(document, 'createElement').mockReturnValue(anchor as unknown as HTMLAnchorElement)
+    // A real anchor, so appendChild accepts it; only the side effects are spied.
+    const anchor = document.createElement('a')
+    const click = vi.spyOn(anchor, 'click').mockImplementation(() => {})
+    const remove = vi.spyOn(anchor, 'remove').mockImplementation(() => {})
+    vi.spyOn(document, 'createElement').mockReturnValue(anchor)
+    const appendChild = vi.spyOn(document.body, 'appendChild')
 
     downloadBlob(new Blob(['x']), 'mineru-markdown.zip')
 
     expect(createObjectURL).toHaveBeenCalledOnce()
     expect(anchor.href).toBe('blob:xyz')
     expect(anchor.download).toBe('mineru-markdown.zip')
+    // Firefox/Safari need the anchor in the document for `download` to take effect.
+    expect(appendChild).toHaveBeenCalledWith(anchor)
     expect(click).toHaveBeenCalledOnce()
+    expect(remove).toHaveBeenCalledOnce()
 
-    // Revoked on the next tick, not synchronously: a browser may not have started the
-    // download yet when click() returns.
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Not revoked on the next tick: that is early enough to cancel a large save.
+    vi.advanceTimersByTime(0)
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(4000)
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:xyz')
-
-    vi.unstubAllGlobals()
-    vi.restoreAllMocks()
   })
 })

@@ -1,3 +1,5 @@
+import { useEffect, useId, useRef } from 'react'
+
 interface Props {
   open: boolean
   title: string
@@ -8,12 +10,28 @@ interface Props {
 }
 
 export function ConfirmDialog({ open, title, body, confirmLabel, onConfirm, onCancel }: Props) {
+  const titleId = useId()
+  const bodyId = useId()
+  const panel = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel()
+    }
+    document.addEventListener('keydown', onKey)
+    // Move focus into the dialog; a modal that leaves focus behind it is announced as
+    // hiding the page while still accepting Tab into it.
+    panel.current?.focus()
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onCancel])
+
   if (!open) return null
   return (
-    <div role="dialog" aria-modal="true" className="fixed inset-0 z-30 flex items-center justify-center bg-black/30">
-      <div className="w-96 rounded-lg bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-medium">{title}</h2>
-        <p className="mt-2 text-sm text-slate-600">{body}</p>
+    <div role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId} className="fixed inset-0 z-30 flex items-center justify-center bg-black/30">
+      <div ref={panel} tabIndex={-1} className="w-96 rounded-lg bg-white p-6 shadow-xl outline-none">
+        <h2 id={titleId} className="text-lg font-medium">{title}</h2>
+        <p id={bodyId} className="mt-2 text-sm text-slate-600">{body}</p>
         <div className="mt-6 flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="rounded border px-4 py-2">
             Cancel

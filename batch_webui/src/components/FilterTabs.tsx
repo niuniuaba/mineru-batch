@@ -12,6 +12,7 @@ export function FilterTabs({ value, counts, onChange }: Props) {
       {BUCKETS.map((bucket) => (
         <button
           key={bucket}
+          type="button"
           role="tab"
           aria-selected={value === bucket}
           onClick={() => onChange(bucket)}
@@ -20,7 +21,7 @@ export function FilterTabs({ value, counts, onChange }: Props) {
           }`}
         >
           {bucket}
-          {bucket !== 'all' && counts[bucket] != null ? ` (${counts[bucket]})` : ''}
+          {bucket !== 'all' && counts[bucket] !== undefined ? ` (${counts[bucket]})` : ''}
         </button>
       ))}
     </div>

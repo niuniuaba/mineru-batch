@@ -245,7 +245,9 @@ function renderStatus(payload) {
   const cfg = payload.config || {};
   $("config").textContent = "";
   const line = document.createElement("span");
-  line.textContent = `tier ${cfg.tier} · image-mode ${cfg.image_mode} · in ${cfg.input_dir} · out ${cfg.output_dir}`;
+  // tier and image_mode live in the server-declared records, not as top-level keys.
+  const record = (key) => (cfg.records || []).find((r) => r.key === key)?.value;
+  line.textContent = `tier ${record("tier")} · image-mode ${record("image_mode")} · in ${cfg.input_dir} · out ${cfg.output_dir}`;
   const code = document.createElement("code");
   code.textContent = `queued ${cfg.queued_in_input}`;
   $("config").append(line, document.createTextNode(" · "), code);

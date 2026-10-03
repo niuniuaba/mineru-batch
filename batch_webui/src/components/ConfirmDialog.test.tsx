@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { ConfirmDialog } from './ConfirmDialog'
 
 const base = {
@@ -37,5 +37,19 @@ describe('ConfirmDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
     expect(onCancel).toHaveBeenCalledOnce()
     expect(onConfirm).not.toHaveBeenCalled()
+  })
+})
+
+describe('ConfirmDialog accessibility', () => {
+  it('cancels on Escape', async () => {
+    const onCancel = vi.fn()
+    render(<ConfirmDialog open {...base} onCancel={onCancel} />)
+    await userEvent.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledOnce()
+  })
+
+  it('has an accessible name', () => {
+    render(<ConfirmDialog open {...base} />)
+    expect(screen.getByRole('dialog', { name: /Delete 2 document/ })).toBeInTheDocument()
   })
 })

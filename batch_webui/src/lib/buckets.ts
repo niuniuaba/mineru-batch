@@ -16,7 +16,9 @@ const BY_STATUS: Record<DocStatus, Exclude<Bucket, 'all'>> = {
 
 /** The user-facing bucket a raw server status belongs to. */
 export function bucketOf(status: DocStatus): Exclude<Bucket, 'all'> {
-  return BY_STATUS[status]
+  // The statuses arrive from the network unchecked; an unrecognised one must still land
+  // in a bucket the user can act on rather than becoming NaN in the counts.
+  return BY_STATUS[status] ?? 'pending'
 }
 
 export function matchesBucket(row: DocRow, bucket: Bucket): boolean {

@@ -19,6 +19,8 @@ export async function uploadFiles(
   files.forEach((file) => form.append('files', file, file.name))
   relativePaths.forEach((relative) => form.append('relative_paths', relative))
   const { data } = await http.post<{ count: number }>('/api/upload', form, {
+    // No timeout: the poll timeout would abort a large upload on a slow link mid-transfer.
+    timeout: 0,
     onUploadProgress: (event) => {
       if (onProgress && event.total) onProgress(event.loaded / event.total)
     },
@@ -50,9 +52,6 @@ export async function downloadResult(path: string): Promise<Blob> {
   const response = await http.get('/api/results/download', { params: { path }, responseType: 'blob' })
   return response.data as Blob
 }
-
-export const resultDownloadUrl = (path: string): string =>
-  `/api/results/download?path=${encodeURIComponent(path)}`
 
 export async function zipResults(paths: string[]): Promise<Blob> {
   const response = await http.post('/api/results/zip', { paths }, { responseType: 'blob' })

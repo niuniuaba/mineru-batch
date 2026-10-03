@@ -36,6 +36,12 @@ describe('describeChange', () => {
     expect(describeChange({ ...base, effect: 'read_only' })).toMatch(/detected|not configurable/i)
   })
 
+  it('does not start the sentence with a dangling conjunction', () => {
+    const text = describeChange({ ...base, env_var: null, config_file: '/etc/mineru/config.yaml' })
+    expect(text.startsWith('edit /etc/mineru/config.yaml')).toBe(true)
+    expect(text).not.toMatch(/^or /)
+  })
+
   it('still gives an instruction when the server names no knob', () => {
     const text = describeChange({ ...base, env_var: null, config_file: null })
     expect(text.length).toBeGreaterThan(0)

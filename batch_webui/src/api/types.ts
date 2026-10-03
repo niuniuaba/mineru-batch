@@ -13,6 +13,20 @@ export interface DocRow {
   has_result: boolean
 }
 
+/**
+ * Rows inside /api/status are the runner's live state, keyed by `name` — not the merged
+ * rows `/api/documents` returns. Typing them as DocRow let `status.files[0].path`
+ * typecheck while being `undefined` at runtime.
+ */
+export interface LiveRow {
+  name: string
+  status: DocStatus
+  pages: number | null
+  seconds: number | null
+  rate: number | null
+  error: string | null
+}
+
 export interface DocumentsResponse {
   state: RunState
   counts: Record<string, number>
@@ -40,7 +54,8 @@ export interface StatusResponse {
   started_at: number | null
   ended_at: number | null
   counts: Record<string, number>
-  files: DocRow[]
+  external?: boolean
+  files: LiveRow[]
   config: {
     records: ConfigRecord[]
     input_dir: string

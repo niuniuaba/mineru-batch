@@ -26,6 +26,10 @@ describe('bucketOf', () => {
     expect(bucketOf('running')).toBe('running')
   })
 
+  it('falls back to pending for a status the console does not know', () => {
+    expect(bucketOf('cancelled' as DocRow['status'])).toBe('pending')
+  })
+
   it('keeps pending and failed distinct', () => {
     expect(bucketOf('pending')).toBe('pending')
     expect(bucketOf('failed')).toBe('failed')

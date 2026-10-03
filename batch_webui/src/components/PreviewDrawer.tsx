@@ -46,7 +46,9 @@ export function PreviewDrawer({ path, onClose }: Props) {
           onClick={() => {
             // Through axios, so a bearer token travels with the request. A plain link
             // would send none and a token-protected server would answer 401.
-            void downloadResult(path).then((blob) => downloadBlob(blob, path.split('/').pop() ?? 'document.md'))
+            downloadResult(path)
+              .then((blob) => downloadBlob(blob, path.split('/').pop() ?? 'document.md'))
+              .catch((failure: Error) => setError(failure.message))
           }}
           className="text-sm text-blue-700 hover:underline"
         >
@@ -54,7 +56,9 @@ export function PreviewDrawer({ path, onClose }: Props) {
         </button>
         <button
           type="button"
-          onClick={() => void navigator.clipboard?.writeText(text)}
+          onClick={() => {
+            navigator.clipboard?.writeText(text).catch((failure: Error) => setError(`Copy failed: ${failure.message}`))
+          }}
           className="text-sm text-blue-700 hover:underline"
         >
           Copy

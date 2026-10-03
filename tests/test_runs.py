@@ -200,3 +200,79 @@ def test_upload_refuses_an_oversize_file(api: TestClient, tmp_path: Path, monkey
         assert not (tmp_path / "ee-in" / "big.pdf").exists(), "a rejected upload must not be left on disk"
     finally:
         batch_settings.reset_settings()
+
+
+# ── Review findings ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("path", [".", "./", "..", "../x", "/etc/passwd"])
+def test_degenerate_paths_are_refused_with_400_not_500(api: TestClient, path: str) -> None:
+    """`.` has no parts, so indexing parts[0] raised IndexError behind the security guard."""
+    assert api.get("/api/results/content", params={"path": path}).status_code == 400
+
+
+def test_a_failed_line_with_spaces_is_attributed_to_the_right_document(monkeypatch) -> None:
+    """Document names in real corpora contain spaces; the (path)(error) split is ambiguous."""
+    import batch_api
+
+    state = batch_api.RunState()
+    state.state = "running"
+    state.row("my report.pdf")
+    state.row("other.pdf")
+    monkeypatch.setattr(batch_api, "state", state)
+
+    batch_api._handle_line("[1/2] FAILED my report.pdf ValueError: bad")
+
+    assert state.files["my report.pdf"]["status"] == "failed"
+    assert state.files["my report.pdf"]["error"] == "ValueError: bad"
+    assert "my" not in state.files, "the ambiguous split created a bogus row"
+
+
+def test_a_failed_line_with_a_code_suffix_is_parsed(monkeypatch) -> None:
+    import batch_api
+
+    state = batch_api.RunState()
+    state.state = "running"
+    state.row("my report.pdf")
+    monkeypatch.setattr(batch_api, "state", state)
+
+    batch_api._handle_line("[1/2] FAILED my report.pdf code=unsupported FileNotFoundError: gone")
+
+    assert state.files["my report.pdf"]["status"] == "failed"
+    assert state.files["my report.pdf"]["error"] == "FileNotFoundError: gone"
+
+
+def test_start_releases_the_lock_when_the_spawn_fails(api: TestClient, tmp_path: Path, monkeypatch) -> None:
+    """A failed spawn must not leave the service reporting a run it never started."""
+    import batch_api
+
+    _write_input(tmp_path, "a.pdf")
+
+    async def boom(*args, **kwargs):
+        raise OSError("cannot execute")
+
+    monkeypatch.setattr(batch_api.asyncio, "create_subprocess_exec", boom)
+    # TestClient re-raises the server exception; the cleanup is what is under test.
+    with pytest.raises(OSError):
+        api.post("/api/start")
+
+    assert batch_api.state.state != "running"
+    assert batch_api.state.lock_handle is None, "the run lock was left held"
+    assert batch_api._probe_lock() is False
+
+
+def test_documents_reads_the_report_once(api: TestClient, tmp_path: Path, monkeypatch) -> None:
+    import batch_api
+
+    _write_result(tmp_path, "a.pdf")
+    _write_report(tmp_path, [_entry(tmp_path, "a", "done")])
+    calls = {"n": 0}
+    real = batch_api._report_entries
+
+    def counting():
+        calls["n"] += 1
+        return real()
+
+    monkeypatch.setattr(batch_api, "_report_entries", counting)
+    api.get("/api/documents")
+    assert calls["n"] <= 1, f"the run report was parsed {calls['n']} times in one request"

@@ -4,8 +4,12 @@ export function downloadBlob(blob: Blob, filename: string): void {
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = filename
+  // Firefox and Safari have historically needed the anchor in the document for the
+  // `download` attribute to take effect; a detached click can silently do nothing.
+  document.body.appendChild(anchor)
   anchor.click()
-  // Revoke on the next tick: a browser may not have started the download yet when
-  // click() returns, and revoking early cancels it.
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  anchor.remove()
+  // Revoke well after the hand-off. Next-tick is still effectively immediate, and
+  // revoking that early cancels large saves in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
 }

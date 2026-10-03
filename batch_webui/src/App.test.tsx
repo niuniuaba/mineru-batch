@@ -38,7 +38,6 @@ vi.mock('./api/mineru', () => ({
   downloadResult: vi.fn(),
   zipResults: vi.fn(),
   getContent: vi.fn(),
-  resultDownloadUrl: vi.fn((path: string) => path),
 }))
 
 describe('App', () => {

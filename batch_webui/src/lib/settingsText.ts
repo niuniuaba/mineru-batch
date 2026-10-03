@@ -7,8 +7,8 @@ export function describeChange(record: ConfigRecord): string {
   }
   const knobs: string[] = []
   if (record.env_var) knobs.push(`set ${record.env_var}`)
-  if (record.config_file) knobs.push(`or edit ${record.config_file}`)
-  const where = knobs.length ? knobs.join(' ') : 'edit the service environment'
+  if (record.config_file) knobs.push(`edit ${record.config_file}`)
+  const where = knobs.length ? knobs.join(' or ') : 'edit the service environment'
   return record.effect === 'next_run'
     ? `${where} — takes effect on the next run`
     : `${where}, then systemctl restart mineru-batch-api`

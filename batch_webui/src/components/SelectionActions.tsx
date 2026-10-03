@@ -5,13 +5,18 @@ interface Props {
   selected: string[]
   onDelete: () => void
   onClearSelection: () => void
+  onError?: (message: string) => void
 }
 
-export function SelectionActions({ selected, onDelete, onClearSelection }: Props) {
+export function SelectionActions({ selected, onDelete, onClearSelection, onError }: Props) {
   if (selected.length === 0) return null
 
   const downloadSelected = async () => {
-    downloadBlob(await zipResults(selected), 'mineru-markdown.zip')
+    try {
+      downloadBlob(await zipResults(selected), 'mineru-markdown.zip')
+    } catch (failure) {
+      onError?.(failure instanceof Error ? failure.message : String(failure))
+    }
   }
 
   return (

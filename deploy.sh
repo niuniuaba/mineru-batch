@@ -1,21 +1,57 @@
 #!/usr/bin/env bash
-# Build the console, install the units, and restart the service.
+# Build the console, install the units, and (re)start the service.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
 
-if [ -f batch_webui/package.json ]; then
-  (cd batch_webui && bun install --frozen-lockfile && bun run build)
-else
-  echo "batch_webui is not scaffolded yet; skipping the build" >&2
+UNITS=(mineru-batch-api.service mineru-batch.service)
+
+command -v bun >/dev/null || {
+  echo "bun is required to build the console" >&2
+  exit 1
+}
+
+(cd batch_webui && bun install --frozen-lockfile && bun run build)
+
+if [ ! -f batch_webui/dist/index.html ]; then
+  echo "the console build produced no dist/index.html; the service would serve the fallback UI" >&2
+  exit 1
 fi
 
-sudo install -m0644 mineru-batch-api.service /etc/systemd/system/
-sudo install -m0644 mineru-batch.service /etc/systemd/system/
-if [ ! -f /etc/mineru-batch.env ]; then
-  echo "NOTE: /etc/mineru-batch.env does not exist; see batch.env.example" >&2
+# The units ship with placeholders, and the natural place to fill them in is the installed
+# copy. Overwriting that silently would undo the host's configuration and break the restart
+# two steps later, so refuse and show the difference instead.
+for unit in "${UNITS[@]}"; do
+  target="/etc/systemd/system/$unit"
+  if [ -f "$target" ] && ! cmp -s "$unit" "$target"; then
+    echo "REFUSING to overwrite $target: it differs from the copy in this repository." >&2
+    echo "Move host-specific values into a drop-in ($target.d/host.conf), or reconcile by hand:" >&2
+    diff -u "$target" "$unit" >&2 || true
+    exit 1
+  fi
+done
+
+for unit in "${UNITS[@]}"; do
+  sudo install -m0644 "$unit" "/etc/systemd/system/$unit"
+done
+
+ENV_FILE=/etc/mineru-batch.env
+if [ ! -f "$ENV_FILE" ]; then
+  echo "NOTE: $ENV_FILE does not exist; see batch.env.example" >&2
+else
+  mode=$(stat -c '%a' "$ENV_FILE" 2>/dev/null || echo unknown)
+  if [ "$mode" != "600" ]; then
+    echo "WARN: $ENV_FILE is mode $mode; it can hold MINERU_BATCH_TOKEN, so 0600 is safer" >&2
+  fi
 fi
+
 sudo systemctl daemon-reload
-sudo systemctl restart mineru-batch-api
-systemctl status --no-pager mineru-batch-api
+# enable --now, not restart: a fresh host would otherwise run the service until the next
+# reboot and never bring it back.
+sudo systemctl enable --now mineru-batch-api
+if ! sudo systemctl restart mineru-batch-api; then
+  echo "mineru-batch-api failed to restart" >&2
+fi
+systemctl status --no-pager mineru-batch-api || true
+journalctl -u mineru-batch-api -n 20 --no-pager || true

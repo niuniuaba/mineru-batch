@@ -60,6 +60,9 @@ export function partitionBySuffix(
   items: UploadItem[],
   suffixes: string[],
 ): { accepted: UploadItem[]; rejected: string[] } {
+  // An empty list means the status poll has not landed yet — not that nothing is
+  // parseable. Filtering against it would reject an entire drop with a misleading notice.
+  if (suffixes.length === 0) return { accepted: items, rejected: [] }
   const allowed = new Set(suffixes.map((suffix) => suffix.toLowerCase()))
   const accepted: UploadItem[] = []
   const rejected: string[] = []
@@ -70,4 +73,11 @@ export function partitionBySuffix(
     else rejected.push(item.relative)
   }
   return { accepted, rejected }
+}
+
+/** The notice shown when a drop contained files the parser cannot read. */
+export function skippedNotice(rejected: string[]): string | null {
+  if (rejected.length === 0) return null
+  const shown = rejected.slice(0, 3).join(', ')
+  return `Skipped ${rejected.length} file(s) the parser cannot read: ${shown}${rejected.length > 3 ? ', …' : ''}`
 }

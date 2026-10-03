@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api/client'
-import { partitionBySuffix, runUploadChain, shouldStartQueuedRun } from './uploadChain'
+import { partitionBySuffix, runUploadChain, shouldStartQueuedRun, skippedNotice } from './uploadChain'
 
 const file = () => new File(['x'], 'a.pdf')
 
@@ -66,7 +66,25 @@ describe('partitionBySuffix', () => {
     expect(partitionBySuffix([item('README')], ['.pdf']).rejected).toEqual(['README'])
   })
 
-  it('rejects everything when the server declares nothing', () => {
-    expect(partitionBySuffix([item('a.pdf')], []).rejected).toEqual(['a.pdf'])
+  it('does not filter when the server has not declared its suffixes yet', () => {
+    const result = partitionBySuffix([item('a.pdf')], [])
+    expect(result.accepted.map((i) => i.relative)).toEqual(['a.pdf'])
+    expect(result.rejected).toEqual([])
+  })
+})
+
+describe('skippedNotice', () => {
+  it('says nothing when nothing was skipped', () => {
+    expect(skippedNotice([])).toBeNull()
+  })
+
+  it('names the first few skipped files', () => {
+    expect(skippedNotice(['a.txt', 'b.txt'])).toContain('a.txt, b.txt')
+  })
+
+  it('summarises the rest instead of listing them all', () => {
+    const text = skippedNotice(['a', 'b', 'c', 'd', 'e']) as string
+    expect(text).toContain('5 file(s)')
+    expect(text).toContain('…')
   })
 })

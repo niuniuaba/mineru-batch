@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import hmac
 import importlib.metadata
 import json
 import os
@@ -104,6 +105,9 @@ class RunState:
         self.message = ""
         self.stopped = False
         self.files = {}
+        self.process = None
+        self.pid = None
+        self.monitor = None
 
     def row(self, relative: str) -> dict[str, Any]:
         return self.files.setdefault(
@@ -159,6 +163,8 @@ def _safe_relative(relative: str) -> PurePosixPath:
     posix = PurePosixPath(raw)
     if posix.is_absolute() or raw.startswith("/"):
         raise HTTPException(status_code=400, detail=f"absolute path not allowed: {relative}")
+    if not posix.parts:
+        raise HTTPException(status_code=400, detail=f"not a document path: {relative}")
     if ":" in posix.parts[0]:
         raise HTTPException(status_code=400, detail=f"drive-qualified path not allowed: {relative}")
     if any(part == ".." for part in posix.parts):
@@ -219,17 +225,17 @@ def _stem(relative: str) -> str:
     return PurePosixPath(relative).with_suffix("").as_posix()
 
 
-def _input_suffix(relative: str) -> str:
-    """The original extension of the input behind `relative`, or "" when it is unknown.
+def _input_suffixes() -> dict[str, str]:
+    """Stem → the input's own extension, for every queued document.
 
-    A row is named after its converted file (`a.md`) while the input keeps its own
-    extension (`a.pdf`), and only the input tree knows what that was.
+    A row is named after its converted file (`a.md`) while the input keeps its extension
+    (`a.pdf`), and only the input tree knows what that was. Built once per request: the
+    lookup used to walk the whole tree for every path.
     """
-    stem = _stem(relative)
+    suffixes: dict[str, str] = {}
     for candidate in _input_documents():
-        if _stem(candidate) == stem:
-            return Path(candidate).suffix
-    return ""
+        suffixes.setdefault(_stem(candidate), Path(candidate).suffix)
+    return suffixes
 
 
 def _config_records() -> list[dict[str, Any]]:
@@ -330,10 +336,11 @@ def _report_entries() -> dict[str, dict[str, Any]]:
     return entries
 
 
-def _result_index() -> dict[str, dict[str, Any]]:
+def _result_index(metadata: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
     """Converted documents keyed by their path inside ee-md, joined with the run report."""
     settings = get_settings()
-    metadata = _report_entries()
+    if metadata is None:
+        metadata = _report_entries()
 
     results: dict[str, dict[str, Any]] = {}
     if not settings.output_dir.is_dir():
@@ -368,13 +375,15 @@ def _blank_row(relative: str) -> dict[str, Any]:
 def _document_rows() -> list[dict[str, Any]]:
     """One row per document, merged from the live run, the results tree, and ee-in."""
     rows: dict[str, dict[str, Any]] = {}
+    # Parsed once: this endpoint is polled, and the report is read and JSON-decoded.
+    report_entries = _report_entries()
 
     for relative in _input_documents():
         row = _blank_row(relative)
         row["has_input"] = True
         rows.setdefault(_stem(relative), row)
 
-    for relative, info in _result_index().items():
+    for relative, info in _result_index(report_entries).items():
         stem = _stem(relative)
         row = rows.get(stem) or _blank_row(relative)
         row["path"] = relative
@@ -392,7 +401,7 @@ def _document_rows() -> list[dict[str, Any]]:
 
     # Attempted-but-not-produced documents: a failure leaves no .md, so the report is the
     # only place its outcome survives the run.
-    for relative, entry in _report_entries().items():
+    for relative, entry in report_entries.items():
         stem = _stem(relative)
         row = rows.get(stem)
         if row is not None and row["has_result"]:
@@ -455,9 +464,19 @@ def _handle_line(line: str) -> None:
 
     match = RE_FAILED.match(line)
     if match:
-        relative = match.group(3)
+        relative, error = match.group(3), match.group(5)
+        # Document names contain spaces, which defeats the lazy (path)(error) split: for
+        # "FAILED my report.pdf ValueError: bad" the path reads as "my". The queued
+        # documents are the authority on which paths exist, so re-split against them.
+        if relative not in state.files:
+            for candidate in sorted(state.files, key=len, reverse=True):
+                index = line.find(candidate)
+                if index != -1:
+                    relative = candidate
+                    error = re.sub(r"^code=\S+\s+", "", line[index + len(candidate):].strip())
+                    break
         row = state.row(relative)
-        row.update(status="failed", error=match.group(5), pages=None, seconds=None, rate=None)
+        row.update(status="failed", error=error, pages=None, seconds=None, rate=None)
         state.current = None
         state.window = ""
         return
@@ -622,7 +641,7 @@ app = FastAPI(title="MinerU batch control plane", lifespan=lifespan)
 @app.middleware("http")
 async def check_token(request: Request, call_next):
     if get_settings().token and request.url.path.startswith("/api/"):
-        if request.headers.get("authorization") != f"Bearer {get_settings().token}":
+        if not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {get_settings().token}"):
             return JSONResponse({"detail": "invalid token"}, status_code=401)
     return await call_next(request)
 
@@ -696,11 +715,12 @@ async def api_delete_documents(request: Request) -> dict[str, Any]:
     # Validate EVERY path before removing anything. Deleting as we went meant one unsafe
     # path further down the list answered 400 after earlier files were already gone — the
     # caller saw a total failure while part of the batch had been destroyed.
+    suffixes = _input_suffixes()
     targets: list[tuple[str, Path, Path]] = []
     for raw in paths:
         relative = str(raw)
         result_target = _resolve_within(settings.output_dir, relative)
-        input_target = _resolve_within(settings.input_dir, _stem(relative) + _input_suffix(relative))
+        input_target = _resolve_within(settings.input_dir, _stem(relative) + suffixes.get(_stem(relative), ""))
         targets.append((relative, input_target, result_target))
 
     deleted: list[dict[str, Any]] = []
@@ -782,17 +802,28 @@ async def api_start() -> dict[str, Any]:
 
     # Truncate the run log so this run's output stands alone, then hand the file to the
     # child directly: a file survives an API restart, a pipe would not.
-    log_handle = open(get_settings().run_log, "wb")
     try:
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=log_handle,
-            stderr=log_handle,
-            cwd=str(BASE),
-            pass_fds=([lock_fd] if lock_fd is not None else []),
-        )
-    finally:
-        log_handle.close()
+        log_handle = open(get_settings().run_log, "wb")
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=log_handle,
+                stderr=log_handle,
+                cwd=str(BASE),
+                pass_fds=([lock_fd] if lock_fd is not None else []),
+            )
+        finally:
+            log_handle.close()
+    except BaseException:
+        # Nothing started. Release the lock and stop claiming a run is in progress, or
+        # every later /api/start answers 409 until the service is restarted — and
+        # /api/stop would signal whatever process reused the stale pid.
+        _release_lock()
+        state.state = "failed"
+        state.process = None
+        state.pid = None
+        state.message = "the conversion could not be started"
+        raise
 
     state.process = process
     state.pid = process.pid

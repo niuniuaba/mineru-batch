@@ -10,6 +10,7 @@ export function RunStatusBar({ status, onStop, onClear }: Props) {
   if (!status) return null
   const running = status.state === 'running'
   const done = status.counts.done ?? 0
+  const skipped = status.counts.skipped ?? 0
   const failed = status.counts.failed ?? 0
   const total = status.total || 0
   return (
@@ -18,7 +19,8 @@ export function RunStatusBar({ status, onStop, onClear }: Props) {
         {status.state}
       </span>
       <span>
-        {done + failed}/{total} processed · {failed} failed
+        {/* skipped is terminal: a resumed run converts nothing but is finished */}
+        {done + skipped + failed}/{total} processed · {failed} failed
       </span>
       {status.current_file && (
         <span className="text-slate-600">

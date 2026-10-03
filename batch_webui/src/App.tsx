@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { downloadResult } from './api/mineru'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { DocumentsTable } from './components/DocumentsTable'
@@ -14,7 +14,7 @@ import { bucketCounts, matchesBucket, type Bucket } from './lib/buckets'
 import { downloadBlob } from './lib/download'
 
 export default function App() {
-  const { status, documents, error, notice, connected, lastCheck, latencyMs, busy, submit, stop, clear, remove } =
+  const { status, documents, error, notice, connected, lastCheck, latencyMs, busy, submit, stop, clear, remove, reportError } =
     useBatchApi()
   const [bucket, setBucket] = useState<Bucket>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -36,9 +36,23 @@ export default function App() {
       return next
     })
 
+  // A failed download through axios rejects; without this the click does nothing at all.
   const download = (path: string) => {
-    void downloadResult(path).then((blob) => downloadBlob(blob, path.split('/').pop() ?? 'document.md'))
+    downloadResult(path)
+      .then((blob) => downloadBlob(blob, path.split('/').pop() ?? 'document.md'))
+      .catch((failure: Error) => reportError(failure.message))
   }
+
+  // Drop selections for documents that no longer exist, so a destructive action never
+  // targets a path the server would only report as missing.
+  useEffect(() => {
+    if (!documents) return
+    const known = new Set(documents.files.map((row) => row.path))
+    setSelected((previous) => {
+      const next = new Set([...previous].filter((path) => known.has(path)))
+      return next.size === previous.size ? previous : next
+    })
+  }, [documents])
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-4 p-6">
@@ -60,6 +74,7 @@ export default function App() {
         selected={[...selected]}
         onDelete={() => setConfirming('delete')}
         onClearSelection={() => setSelected(new Set())}
+        onError={reportError}
       />
       <DocumentsTable
         rows={rows}
@@ -85,6 +100,8 @@ export default function App() {
           const action = confirming
           setConfirming(null)
           if (action === 'clear') {
+            // Every selected path is gone once the input tree is emptied.
+            setSelected(new Set())
             void clear()
           } else if (action === 'delete') {
             void remove([...selected])
