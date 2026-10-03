@@ -23,7 +23,21 @@ export function toApiError(error: unknown): ApiError {
   return new ApiError(message, response?.status ?? 0)
 }
 
+/**
+ * The service is open by default, but a deployment may require a token. Read it from
+ * storage rather than baking it into the build, so one build serves either case.
+ */
+export function authHeaders(storage: Pick<Storage, 'getItem'> = localStorage): Record<string, string> {
+  const token = storage.getItem('mineru-batch-token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 export const http = axios.create({ baseURL: '/', timeout: 120_000 })
+
+http.interceptors.request.use((config) => {
+  for (const [name, value] of Object.entries(authHeaders())) config.headers.set(name, value)
+  return config
+})
 
 http.interceptors.response.use(
   (response) => response,

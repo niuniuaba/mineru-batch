@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, toApiError } from './client'
+import { ApiError, authHeaders, toApiError } from './client'
+
+const storage = (value: string | null) => ({ getItem: () => value })
 
 describe('toApiError', () => {
   it("surfaces FastAPI's detail string", () => {
@@ -23,5 +25,15 @@ describe('toApiError', () => {
     const result = toApiError(new Error('Network Error'))
     expect(result.status).toBe(0)
     expect(result.message).toBe('Network Error')
+  })
+})
+
+describe('authHeaders', () => {
+  it('sends nothing when no token is stored', () => {
+    expect(authHeaders(storage(null))).toEqual({})
+  })
+
+  it('sends a bearer token when one is stored', () => {
+    expect(authHeaders(storage('secret'))).toEqual({ Authorization: 'Bearer secret' })
   })
 })
