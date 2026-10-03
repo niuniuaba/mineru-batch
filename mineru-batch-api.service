@@ -1,15 +1,18 @@
 ; MinerU batch control plane: upload documents, start a conversion, watch progress,
-; download the resulting Markdown. Always on, so the laptop can drive it any time.
+; download the resulting Markdown. Always on, so a browser can drive it any time.
 ;
 ; The conversion itself is done by batch-convert.py, spawned as a child of this service;
 ; this process is only the control plane (upload, status, download).
 ;
+; This unit carries no site-specific values. Copy batch.env.example to
+; /etc/mineru-batch.env, fill in the real paths, and adjust the two ExecStart paths and
+; User/Group below for the host.
+;
 ; Install and enable at boot:
-;   sudo install -m0644 /home/wing/Apps/mineru/mineru-batch-api.service /etc/systemd/system/
+;   sudo install -m0644 mineru-batch-api.service /etc/systemd/system/
+;   sudo install -m0600 batch.env.example /etc/mineru-batch.env   # then edit it
 ;   sudo systemctl daemon-reload
 ;   sudo systemctl enable --now mineru-batch-api
-;
-; Then, from the laptop:  open http://192.168.0.102:8090/
 ;
 ; Logs / troubleshooting:
 ;   journalctl -u mineru-batch-api -f
@@ -18,32 +21,24 @@
 [Unit]
 Description=MinerU batch control plane (upload, status, download)
 Documentation=https://opendatalab.github.io/MinerU/
-; The venv and models live on /home; uploads and results live on the /mnt/nas/media disk.
-RequiresMountsFor=/home/wing /mnt/nas/media
+; The virtualenv and the model weights live under the service user's home, so do not
+; start before the home filesystem is mounted.
+RequiresMountsFor=/home
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
 Type=simple
-User=wing
-Group=wing
-WorkingDirectory=/home/wing/Apps/mineru
+User=CHANGE_ME
+Group=CHANGE_ME
+WorkingDirectory=/path/to/mineru-batch
 
-Environment=HOME=/home/wing
-Environment=MINERU_HOME=/home/wing/.mineru
-; Child stdout must not be block-buffered, or run progress never reaches the journal.
 Environment=PYTHONUNBUFFERED=1
+; Site-specific values (MINERU_HOME, MINERU_BATCH_ROOT, tier, image mode, bind address,
+; optional token) live here, outside the repository.
+EnvironmentFile=-/etc/mineru-batch.env
 
-; --- control plane configuration -------------------------------------------
-Environment=MINERU_BATCH_ROOT=/mnt/nas/media/mineru
-Environment=MINERU_BATCH_TIER=basic
-Environment=MINERU_BATCH_IMAGE_MODE=marker
-Environment=MINERU_BATCH_PORT=8090
-; Uncomment to require a bearer token on every /api/ call (the page then needs the
-; matching value typed in, so leave it off for the browser UI unless you add that).
-;Environment=MINERU_BATCH_TOKEN=change-me
-
-ExecStart=/home/wing/Apps/mineru/bin/python /home/wing/Apps/mineru/batch_api.py
+ExecStart=/path/to/venv/bin/python /path/to/mineru-batch/batch_api.py
 
 ; "Always ready": come back after a crash, and again after a reboot via [Install].
 Restart=always
@@ -71,7 +66,8 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 ; /usr, /boot and /etc read-only.
 ProtectSystem=full
-; ProtectHome MUST stay "no": the venv and the model weights are under /home/wing.
+; ProtectHome MUST stay "no": the virtualenv and the model weights live under the home
+; directory. Setting it to "yes" makes the service fail to start.
 ProtectHome=no
 
 ; --- Resource limits -------------------------------------------------------
@@ -86,13 +82,15 @@ WantedBy=multi-user.target
 ; ===========================================================================
 ;
 ; Security: there is no authentication by default. Anyone who can reach this port on the
-; LAN can upload files, start a conversion, and download results. That matches the
-; existing WebUI on this host, but this endpoint also WRITES to the NAS disk, so it is
-; worth knowing. Uploads are confined to ee-in by path normalisation (absolute paths,
-; `..`, drive letters and symlink escapes are all refused) and capped per file
-; (MINERU_BATCH_MAX_UPLOAD_BYTES, default 500 MB). MINERU_BATCH_TOKEN adds a bearer-token
-; check if you want it.
+; LAN can upload files, start a conversion, and download results. This endpoint also
+; writes to disk, so it is worth knowing. Uploads are confined to the input directory by
+; path normalisation (absolute paths, `..`, drive letters and symlink escapes are all
+; refused) and capped per file (MINERU_BATCH_MAX_UPLOAD_BYTES, default 500 MB).
+; MINERU_BATCH_TOKEN adds a bearer-token check if you want it.
 ;
-; Relationship to the other units: mineru-batch.service (the headless runner) still works
+; Storage defaults to $MINERU_HOME/batch, so the service needs no mount of its own beyond
+; the home directory.
+;
+; Relationship to the other unit: mineru-batch.service (the headless runner) still works
 ; and is unaffected; it shares the same ee-in/ee-md directories. Do not start both at the
 ; same time — they would race on the same files. Use one or the other.
