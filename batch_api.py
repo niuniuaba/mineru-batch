@@ -35,24 +35,12 @@ from starlette.background import BackgroundTask
 
 # Reuse the runner's own definitions of "parseable" and "Office lock file" so the queue we
 # show can never drift from what the runner will actually pick up.
+from batch_settings import get_settings
 from mineru.filetypes import is_office_temp_lock_file
 from mineru.kit.common import PARSEABLE_SUFFIXES
 
 BASE = Path(__file__).resolve().parent
-ROOT = Path(os.environ.get("MINERU_BATCH_ROOT", "/mnt/nas/media/mineru")).expanduser()
-INPUT_DIR = ROOT / "ee-in"
-OUTPUT_DIR = ROOT / "ee-md"
-RUNNER = Path(os.environ.get("MINERU_BATCH_RUNNER", BASE / "batch-convert.py"))
-REPORT = OUTPUT_DIR / "run-report.json"
-LOCK_PATH = ROOT / ".run.lock"
-UI_PATH = BASE / "batch_ui.html"
 
-TIER = os.environ.get("MINERU_BATCH_TIER", "basic")
-IMAGE_MODE = os.environ.get("MINERU_BATCH_IMAGE_MODE", "marker")
-PORT = int(os.environ.get("MINERU_BATCH_PORT", "8090"))
-HOST = os.environ.get("MINERU_BATCH_HOST", "0.0.0.0")
-TOKEN = os.environ.get("MINERU_BATCH_TOKEN", "")
-MAX_UPLOAD_BYTES = int(os.environ.get("MINERU_BATCH_MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
 
 # The runner's per-document lines are the progress protocol; everything else on stdout
 # (loguru banners, tqdm bars) is ignored.
@@ -66,7 +54,6 @@ RE_WINDOW = re.compile(r"Hybrid processing window (\d+)/(\d+): pages (\S+?)/(\d+
 # The run's stdout/stderr are redirected here and tailed, rather than read from a pipe.
 # A pipe would break under the child if this process died, killing the conversion; a file
 # lets the conversion outlive an API restart, and lets a restarted API replay progress.
-RUN_LOG = ROOT / "run.log"
 
 
 def _pid_alive(pid: int | None) -> bool:
@@ -199,10 +186,10 @@ def _input_documents() -> list[str]:
     skipped — and must not be re-sorted globally, which would put nested paths ahead of
     root ones and misattribute the running document.
     """
-    if not INPUT_DIR.is_dir():
+    if not get_settings().input_dir.is_dir():
         return []
     found: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(INPUT_DIR):
+    for dirpath, dirnames, filenames in os.walk(get_settings().input_dir):
         dirnames[:] = sorted(name for name in dirnames if not name.startswith("."))
         for name in sorted(filenames):
             if name.startswith("."):
@@ -214,7 +201,7 @@ def _input_documents() -> list[str]:
                 continue
             if is_office_temp_lock_file(path):
                 continue
-            found.append(path.relative_to(INPUT_DIR).as_posix())
+            found.append(path.relative_to(get_settings().input_dir).as_posix())
     return found
 
 
@@ -357,8 +344,8 @@ def _acquire_lock() -> bool:
     from startup would make every later `start` fail against ourselves. `api_start` also
     passes this descriptor to the conversion, so the lock outlives this process.
     """
-    ROOT.mkdir(parents=True, exist_ok=True)
-    handle = open(LOCK_PATH, "a+")
+    get_settings().root.mkdir(parents=True, exist_ok=True)
+    handle = open(get_settings().lock_path, "a+")
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -374,9 +361,9 @@ def _acquire_lock() -> bool:
 
 def _probe_lock() -> bool:
     """Report whether another process currently holds the run lock, without holding it."""
-    if not LOCK_PATH.exists():
+    if not get_settings().lock_path.exists():
         return False
-    handle = open(LOCK_PATH, "a+")
+    handle = open(get_settings().lock_path, "a+")
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -389,14 +376,14 @@ def _probe_lock() -> bool:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    get_settings().input_dir.mkdir(parents=True, exist_ok=True)
+    get_settings().output_dir.mkdir(parents=True, exist_ok=True)
     if _probe_lock():
         # A previous API process left a run going. Adopt it: take its pid, rebuild the
         # queue, and resume tailing the run log from the start so progress is restored
         # rather than lost with the previous process.
         try:
-            state.pid = int(LOCK_PATH.read_text().split()[0])
+            state.pid = int(get_settings().lock_path.read_text().split()[0])
         except (OSError, ValueError, IndexError):
             state.pid = None
         state.state = "running"
@@ -404,8 +391,8 @@ async def lifespan(_: FastAPI):
         state.message = "adopted a run started by a previous API process"
         for relative in _input_documents():
             state.row(relative)
-        if RUN_LOG.is_file():
-            state.monitor = asyncio.create_task(_tail_run(RUN_LOG, state.pid, None))
+        if get_settings().run_log.is_file():
+            state.monitor = asyncio.create_task(_tail_run(get_settings().run_log, state.pid, None))
     yield
     if state.process is not None:
         state.process.terminate()
@@ -417,27 +404,27 @@ app = FastAPI(title="MinerU batch control plane", lifespan=lifespan)
 
 @app.middleware("http")
 async def check_token(request: Request, call_next):
-    if TOKEN and request.url.path.startswith("/api/"):
-        if request.headers.get("authorization") != f"Bearer {TOKEN}":
+    if get_settings().token and request.url.path.startswith("/api/"):
+        if request.headers.get("authorization") != f"Bearer {get_settings().token}":
             return JSONResponse({"detail": "invalid token"}, status_code=401)
     return await call_next(request)
 
 
 @app.get("/")
 async def index() -> FileResponse:
-    if not UI_PATH.is_file():
-        raise HTTPException(status_code=500, detail=f"missing {UI_PATH.name}")
-    return FileResponse(UI_PATH, media_type="text/html")
+    if not get_settings().ui_fallback.is_file():
+        raise HTTPException(status_code=500, detail=f"missing {get_settings().ui_fallback.name}")
+    return FileResponse(get_settings().ui_fallback, media_type="text/html")
 
 
 @app.get("/api/status")
 async def api_status() -> dict[str, Any]:
     payload = state.summary()
     payload["config"] = {
-        "tier": TIER,
-        "image_mode": IMAGE_MODE,
-        "input_dir": str(INPUT_DIR),
-        "output_dir": str(OUTPUT_DIR),
+        "tier": get_settings().tier,
+        "image_mode": get_settings().image_mode,
+        "input_dir": str(get_settings().input_dir),
+        "output_dir": str(get_settings().output_dir),
         "queued_in_input": len(_input_documents()),
     }
     return payload
@@ -449,25 +436,25 @@ async def api_upload(
     relative_paths: list[str] = Form(default=[]),
 ) -> dict[str, Any]:
     """Store uploaded files under the input directory, preserving relative paths."""
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    get_settings().input_dir.mkdir(parents=True, exist_ok=True)
     saved: list[dict[str, Any]] = []
     for index, upload in enumerate(files):
         relative = relative_paths[index] if index < len(relative_paths) else (upload.filename or "")
-        target = _resolve_within(INPUT_DIR, relative)
+        target = _resolve_within(get_settings().input_dir, relative)
         target.parent.mkdir(parents=True, exist_ok=True)
         size = 0
         with open(target, "wb") as handle:
             while chunk := await upload.read(1024 * 1024):
                 size += len(chunk)
-                if size > MAX_UPLOAD_BYTES:
+                if size > get_settings().max_upload_bytes:
                     handle.close()
                     target.unlink(missing_ok=True)
                     raise HTTPException(
                         status_code=413,
-                        detail=f"{upload.filename} exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB per-file limit",
+                        detail=f"{upload.filename} exceeds the {get_settings().max_upload_bytes // (1024 * 1024)} MB per-file limit",
                     )
                 handle.write(chunk)
-        saved.append({"path": target.relative_to(INPUT_DIR).as_posix(), "bytes": size})
+        saved.append({"path": target.relative_to(get_settings().input_dir).as_posix(), "bytes": size})
     return {"saved": saved, "count": len(saved)}
 
 
@@ -475,7 +462,7 @@ async def api_upload(
 async def api_start() -> dict[str, Any]:
     documents = _input_documents()
     if not documents:
-        raise HTTPException(status_code=400, detail=f"nothing to convert in {INPUT_DIR}")
+        raise HTTPException(status_code=400, detail=f"nothing to convert in {get_settings().input_dir}")
     if state.state == "running":
         raise HTTPException(status_code=409, detail="a run is already in progress")
     if not _acquire_lock():
@@ -486,12 +473,12 @@ async def api_start() -> dict[str, Any]:
         state.row(relative)
     command = [
         sys.executable,
-        str(RUNNER),
-        "--input", str(INPUT_DIR),
-        "--output", str(OUTPUT_DIR),
-        "--tier", TIER,
-        "--image-mode", IMAGE_MODE,
-        "--report", str(REPORT),
+        str(get_settings().runner),
+        "--input", str(get_settings().input_dir),
+        "--output", str(get_settings().output_dir),
+        "--tier", get_settings().tier,
+        "--image-mode", get_settings().image_mode,
+        "--report", str(get_settings().report),
     ]
     # The conversion inherits the run-lock descriptor. An flock belongs to the open file
     # description, so passing it on makes the lock last exactly as long as the conversion
@@ -502,7 +489,7 @@ async def api_start() -> dict[str, Any]:
 
     # Truncate the run log so this run's output stands alone, then hand the file to the
     # child directly: a file survives an API restart, a pipe would not.
-    log_handle = open(RUN_LOG, "wb")
+    log_handle = open(get_settings().run_log, "wb")
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -523,7 +510,7 @@ async def api_start() -> dict[str, Any]:
         state.lock_handle.truncate()
         state.lock_handle.write(f"{process.pid}\n")
         state.lock_handle.flush()
-    state.monitor = asyncio.create_task(_tail_run(RUN_LOG, process.pid, process))
+    state.monitor = asyncio.create_task(_tail_run(get_settings().run_log, process.pid, process))
     return {"started": True, "documents": len(documents), "pid": process.pid}
 
 
@@ -554,7 +541,7 @@ async def api_clear() -> dict[str, Any]:
     if state.state == "running":
         raise HTTPException(status_code=409, detail="refusing to clear the input directory while a run is in progress")
     removed = 0
-    for path in sorted(INPUT_DIR.rglob("*"), reverse=True):
+    for path in sorted(get_settings().input_dir.rglob("*"), reverse=True):
         if path.is_file():
             path.unlink()
             removed += 1
@@ -567,12 +554,12 @@ async def api_clear() -> dict[str, Any]:
 async def api_results() -> dict[str, Any]:
     """Converted documents, from the filesystem so it also covers earlier runs."""
     metadata: dict[str, dict[str, Any]] = {}
-    if REPORT.is_file():
+    if get_settings().report.is_file():
         try:
-            for entry in json.loads(REPORT.read_text(encoding="utf-8")).get("entries", []):
+            for entry in json.loads(get_settings().report.read_text(encoding="utf-8")).get("entries", []):
                 output = Path(entry.get("output", ""))
                 try:
-                    key = output.relative_to(OUTPUT_DIR).as_posix()
+                    key = output.relative_to(get_settings().output_dir).as_posix()
                 except ValueError:
                     continue
                 metadata[key] = entry
@@ -580,10 +567,10 @@ async def api_results() -> dict[str, Any]:
             pass
 
     documents: list[dict[str, Any]] = []
-    for path in sorted(OUTPUT_DIR.rglob("*.md")):
+    for path in sorted(get_settings().output_dir.rglob("*.md")):
         if not path.is_file():
             continue
-        key = path.relative_to(OUTPUT_DIR).as_posix()
+        key = path.relative_to(get_settings().output_dir).as_posix()
         info = metadata.get(key, {})
         stat = path.stat()
         documents.append(
@@ -601,7 +588,7 @@ async def api_results() -> dict[str, Any]:
 
 @app.get("/api/results/download")
 async def api_download(path: str) -> FileResponse:
-    target = _resolve_within(OUTPUT_DIR, path)
+    target = _resolve_within(get_settings().output_dir, path)
     if target.suffix.lower() != ".md" or not target.is_file():
         raise HTTPException(status_code=404, detail=f"not a converted markdown file: {path}")
     return FileResponse(target, media_type="text/markdown", filename=target.name)
@@ -621,10 +608,10 @@ async def api_zip(request: Request) -> FileResponse:
         with zipfile.ZipFile(handle, "w", zipfile.ZIP_DEFLATED) as archive:
             for relative in paths:
                 # Each entry is validated independently; one bad path fails the request.
-                target = _resolve_within(OUTPUT_DIR, str(relative))
+                target = _resolve_within(get_settings().output_dir, str(relative))
                 if target.suffix.lower() != ".md" or not target.is_file():
                     continue
-                archive.write(target, arcname=target.relative_to(OUTPUT_DIR.resolve()).as_posix())
+                archive.write(target, arcname=target.relative_to(get_settings().output_dir.resolve()).as_posix())
                 added += 1
     finally:
         handle.close()
@@ -645,14 +632,14 @@ async def api_zip(request: Request) -> FileResponse:
 def main() -> None:
     import uvicorn
 
-    if not RUNNER.is_file():
-        print(f"runner not found: {RUNNER}", file=sys.stderr, flush=True)
+    if not get_settings().runner.is_file():
+        print(f"runner not found: {get_settings().runner}", file=sys.stderr, flush=True)
         raise SystemExit(2)
-    print(f"batch control plane on http://{HOST}:{PORT}/  tier={TIER} image-mode={IMAGE_MODE}", flush=True)
-    print(f"  input  {INPUT_DIR}", flush=True)
-    print(f"  output {OUTPUT_DIR}", flush=True)
-    print(f"  auth   {'bearer token required' if TOKEN else 'none (LAN-open)'}", flush=True)
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+    print(f"batch control plane on http://{get_settings().host}:{get_settings().port}/  tier={get_settings().tier} image-mode={get_settings().image_mode}", flush=True)
+    print(f"  input  {get_settings().input_dir}", flush=True)
+    print(f"  output {get_settings().output_dir}", flush=True)
+    print(f"  auth   {'bearer token required' if get_settings().token else 'none (LAN-open)'}", flush=True)
+    uvicorn.run(app, host=get_settings().host, port=get_settings().port, log_level="warning")
 
 
 if __name__ == "__main__":
