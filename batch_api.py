@@ -216,6 +216,19 @@ def _stem(relative: str) -> str:
     return PurePosixPath(relative).with_suffix("").as_posix()
 
 
+def _input_suffix(relative: str) -> str:
+    """The original extension of the input behind `relative`, or "" when it is unknown.
+
+    A row is named after its converted file (`a.md`) while the input keeps its own
+    extension (`a.pdf`), and only the input tree knows what that was.
+    """
+    stem = _stem(relative)
+    for candidate in _input_documents():
+        if _stem(candidate) == stem:
+            return Path(candidate).suffix
+    return ""
+
+
 def _result_index() -> dict[str, dict[str, Any]]:
     """Converted documents keyed by their path inside ee-md, joined with the run report."""
     settings = get_settings()
@@ -535,6 +548,50 @@ async def api_documents() -> dict[str, Any]:
     for row in rows:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
     return {"state": state.state, "counts": counts, "files": rows}
+
+
+@app.post("/api/documents/delete")
+async def api_delete_documents(request: Request) -> dict[str, Any]:
+    """Remove selected documents: the input, and by default the converted result too.
+
+    Refused entirely while a run is active, for the same reason /api/clear is: the runner's
+    progress is derived from the queue it built at start, and mutating the tree underneath
+    it would make "currently running" ambiguous.
+    """
+    settings = get_settings()
+    if state.state == "running":
+        raise HTTPException(status_code=409, detail="refusing to delete documents while a run is in progress")
+
+    body = await request.json()
+    paths = body.get("paths") if isinstance(body, dict) else None
+    if not isinstance(paths, list) or not paths:
+        raise HTTPException(status_code=400, detail="provide a non-empty list of paths")
+    delete_result = bool(body.get("delete_result", True))
+
+    deleted: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for raw in paths:
+        relative = str(raw)
+        # Validate against both roots before touching anything: an unsafe path fails the
+        # request rather than being skipped, because it means the caller is confused.
+        result_target = _resolve_within(settings.output_dir, relative)
+        input_target = _resolve_within(settings.input_dir, _stem(relative) + _input_suffix(relative))
+
+        removed_result = False
+        removed_input = False
+        if delete_result and result_target.is_file():
+            result_target.unlink()
+            removed_result = True
+        if input_target.is_file():
+            input_target.unlink()
+            removed_input = True
+
+        if removed_input or removed_result:
+            deleted.append({"path": relative, "input": removed_input, "result": removed_result})
+        else:
+            missing.append(relative)
+
+    return {"deleted": deleted, "missing": missing}
 
 
 @app.post("/api/upload")
