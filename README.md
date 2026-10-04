@@ -77,10 +77,27 @@ cd batch_webui && bun run dev                        # the console, proxied
 ./deploy.sh          # builds the console, installs the units, restarts the service
 ```
 
-`deploy.sh` needs `/etc/mineru-batch.env` and the two paths in the unit files adjusted for
-the host (`ExecStart`, `WorkingDirectory`, `User`). The built console lands in
-`batch_webui/dist/`, which is gitignored and built at deploy time; if it is missing, `/`
-falls back to the single-file `batch_ui.html`.
+`deploy.sh` needs `/etc/mineru-batch.env` and the paths in the unit files adjusted for the
+host (`ExecStart`, `WorkingDirectory`). The built console lands in `batch_webui/dist/`,
+which is gitignored and built at deploy time; if it is missing, `/` falls back to the
+single-file `batch_ui.html`.
+
+`User=` and `Group=` cannot come from an environment file, so they do not belong in the
+installed unit — a unit that still has the `CHANGE_ME` placeholder fails to start with a
+bare `status=217/USER`. Put the host's own values in a drop-in, which keeps the installed
+unit identical to this repository (so `deploy.sh` will not refuse to overwrite it):
+
+```bash
+for unit in mineru-batch-api mineru-batch; do
+  sudo install -d "/etc/systemd/system/$unit.service.d"
+  printf '[Service]\nUser=%s\nGroup=%s\n' "$(id -un)" "$(id -gn)" \
+    | sudo tee "/etc/systemd/system/$unit.service.d/host.conf"
+done
+sudo systemctl daemon-reload
+```
+
+Check it took with `systemctl show -p User --value mineru-batch-api`, which should print
+your user rather than `CHANGE_ME`.
 
 There is no authentication by default: anyone who can reach the port can upload, convert
 and download. Set `MINERU_BATCH_TOKEN` to change that.

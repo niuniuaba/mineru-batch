@@ -38,7 +38,7 @@ StartLimitBurst=3
 Type=simple
 User=CHANGE_ME
 Group=CHANGE_ME
-WorkingDirectory=/path/to/mineru-batch
+WorkingDirectory=/home/wing/Apps/mineru-batch
 
 ; Without this, Python block-buffers stdout when it is not a tty and the journal stays
 ; empty until the process exits, making a long run impossible to watch.
@@ -48,7 +48,11 @@ EnvironmentFile=-/etc/mineru-batch.env
 ; The tier is deliberately `basic`: the small ONNX models run on CPU. A VLM tier is
 ; available but is markedly slower and needs a GPU with far more memory than a small
 ; consumer card has.
-ExecStart=/path/to/venv/bin/python /path/to/mineru-batch/batch-convert.py \
+; Refuse to run against a path that was never configured. systemd expands an unset
+; variable to nothing, and the runner would then read /ee-in without complaining.
+ExecStartPre=/bin/sh -c '[ -n "${MINERU_BATCH_ROOT}" ] || { echo "MINERU_BATCH_ROOT is not set in /etc/mineru-batch.env" >&2; exit 1; }'
+
+ExecStart=/home/wing/Apps/mineru/bin/python /path/to/mineru-batch/batch-convert.py \
     --input ${MINERU_BATCH_ROOT}/ee-in \
     --output ${MINERU_BATCH_ROOT}/ee-md \
     --tier ${MINERU_BATCH_TIER} \

@@ -47,6 +47,22 @@ else
 fi
 
 sudo systemctl daemon-reload
+
+# User= cannot come from EnvironmentFile, so a unit that still has the placeholder fails at
+# start with a bare "status=217/USER". Catch it here, with the fix. Checked through systemd
+# rather than by grepping the file, so a drop-in satisfies it.
+for unit in "${UNITS[@]}"; do
+  user=$(systemctl show -p User --value "$unit" 2>/dev/null || true)
+  if [ -z "$user" ] || [ "$user" = "CHANGE_ME" ]; then
+    echo "REFUSING to start: $unit has no usable User= (got '${user:-unset}')." >&2
+    echo "Set it in a drop-in, so the installed unit keeps matching this repository:" >&2
+    echo "  sudo install -d /etc/systemd/system/$unit.d" >&2
+    echo "  printf '[Service]\\nUser=%s\\nGroup=%s\\n' \"\$(id -un)\" \"\$(id -gn)\" | sudo tee /etc/systemd/system/$unit.d/host.conf" >&2
+    echo "  sudo systemctl daemon-reload" >&2
+    exit 1
+  fi
+done
+
 # enable --now, not restart: a fresh host would otherwise run the service until the next
 # reboot and never bring it back.
 sudo systemctl enable --now mineru-batch-api
