@@ -31,14 +31,14 @@ StartLimitBurst=5
 Type=simple
 User=CHANGE_ME
 Group=CHANGE_ME
-WorkingDirectory=/home/wing/Apps/mineru-batch
+WorkingDirectory=/path/to/mineru-batch
 
 Environment=PYTHONUNBUFFERED=1
 ; Site-specific values (MINERU_HOME, MINERU_BATCH_ROOT, tier, image mode, bind address,
 ; optional token) live here, outside the repository.
 EnvironmentFile=-/etc/mineru-batch.env
 
-ExecStart=/home/wing/Apps/mineru/bin/python /home/wing/Apps/mineru-batch/batch_api.py
+ExecStart=/path/to/venv/bin/python /path/to/mineru-batch/batch_api.py
 
 ; "Always ready": come back after a crash, and again after a reboot via [Install].
 Restart=always
