@@ -12,11 +12,11 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { UploadDialog } from './components/UploadDialog'
 import { useBatchApi } from './hooks/useBatchApi'
 import { useTheme } from './hooks/useTheme'
-import { bucketCounts, matchesBucket, type Bucket } from './lib/buckets'
+import { bucketCounts, isResumable, matchesBucket, type Bucket } from './lib/buckets'
 import { downloadBlob } from './lib/download'
 
 export default function App() {
-  const { status, documents, error, notice, connected, lastCheck, latencyMs, busy, submit, stop, clear, remove, reportError } =
+  const { status, documents, error, notice, connected, lastCheck, latencyMs, busy, submit, start, stop, clear, remove, reportError } =
     useBatchApi()
   const { theme, toggle } = useTheme()
   const [bucket, setBucket] = useState<Bucket>('all')
@@ -31,6 +31,10 @@ export default function App() {
   // Counted from the rows, not from the server's raw statuses: the tabs are buckets, and
   // `done` and `skipped` both mean converted.
   const counts = useMemo(() => bucketCounts(allRows), [allRows])
+  const resumableCount = useMemo(
+    () => allRows.filter((row) => selected.has(row.path) && isResumable(row)).length,
+    [allRows, selected],
+  )
 
   const toggleRow = (path: string) =>
     setSelected((previous) => {
@@ -97,6 +101,8 @@ export default function App() {
 
       <SelectionActions
         selected={[...selected]}
+        resumableCount={resumableCount}
+        onResume={() => void start()}
         onDelete={() => setConfirming('delete')}
         onClearSelection={() => setSelected(new Set())}
         onError={reportError}

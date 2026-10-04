@@ -107,3 +107,21 @@ describe('header', () => {
     document.documentElement.classList.remove('dark')
   })
 })
+
+describe('resume', () => {
+  it('resumes the unfinished documents from the selection bar', async () => {
+    vi.mocked(api.getDocuments).mockResolvedValue({
+      state: 'done',
+      counts: { pending: 2, converted: 1 },
+      files: [
+        { path: 'a.md', status: 'pending', pages: null, seconds: null, rate: null, bytes: null, error: null, has_input: true, has_result: false },
+        { path: 'b.md', status: 'converted', pages: 2, seconds: 1, rate: 2, bytes: 10, error: null, has_input: true, has_result: true },
+      ],
+    } as never)
+    render(<App />)
+    await userEvent.click(await screen.findByLabelText('Select all'))
+    expect(screen.getByRole('button', { name: /^resume 1$/i })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^resume 1$/i }))
+    await waitFor(() => expect(api.startRun).toHaveBeenCalled())
+  })
+})

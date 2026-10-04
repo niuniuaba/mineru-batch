@@ -31,3 +31,13 @@ export function bucketCounts(rows: DocRow[]): Record<Bucket, number> {
   for (const row of rows) counts[bucketOf(row.status)] += 1
   return counts
 }
+
+const FINISHED: DocStatus[] = ['done', 'skipped', 'converted']
+
+/**
+ * Whether a run would still have work for this document. The engine skips anything whose
+ * result already exists, so this is exactly the set a resume would convert.
+ */
+export function isResumable(row: DocRow): boolean {
+  return !FINISHED.includes(row.status)
+}

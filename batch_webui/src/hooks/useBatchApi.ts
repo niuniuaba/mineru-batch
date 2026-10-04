@@ -134,6 +134,7 @@ export function useBatchApi() {
     [refresh],
   )
 
+  const start = useCallback(() => act(api.startRun), [act])
   const stop = useCallback(() => act(api.stopRun), [act])
   const clear = useCallback(() => act(api.clearInput), [act])
   const remove = useCallback((paths: string[]) => act(() => api.deleteDocuments(paths)), [act])
@@ -149,6 +150,7 @@ export function useBatchApi() {
     busy: inFlight > 0,
     refresh,
     submit,
+    start,
     stop,
     clear,
     remove,

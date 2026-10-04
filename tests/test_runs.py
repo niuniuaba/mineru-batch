@@ -31,6 +31,10 @@ def _write_report(root: Path, entries: list[dict]) -> Path:
     return report
 
 
+def _rows(api: TestClient) -> dict[str, dict]:
+    return {row["path"]: row for row in api.get("/api/documents").json()["files"]}
+
+
 def _entry(root: Path, stem: str, status: str, **over) -> dict:
     entry = {
         "input": str(root / "ee-in" / f"{stem}.pdf"),
@@ -320,3 +324,55 @@ def test_delete_keeps_directories_that_still_hold_something(api: TestClient, tmp
 
     assert (tmp_path / "ee-md" / "x" / "keep.md").exists()
     assert (tmp_path / "ee-md" / "x").is_dir()
+
+
+def test_a_resume_keeps_the_measurements_the_first_run_recorded(api: TestClient, tmp_path: Path) -> None:
+    """The runner records an already-converted document as skipped, with no measurements.
+
+    Re-running used to overwrite the report and lose the page counts and timings, which is
+    what a resume does routinely.
+    """
+    _write_result(tmp_path, "a.pdf")
+    _write_report(tmp_path, [_entry(tmp_path, "a", "done", pages=7, seconds=3.5)])
+    assert _rows(api)["a.md"]["pages"] == 7
+
+    # Snapshot the first run's report, then let the second run report it as skipped.
+    import shutil
+
+    shutil.copy2(tmp_path / "ee-md" / "run-report.json", tmp_path / "run-report.previous.json")
+    _write_report(tmp_path, [_entry(tmp_path, "a", "skipped", pages=None, seconds=None)])
+
+    row = _rows(api)["a.md"]
+    assert row["pages"] == 7, "the page count was lost by re-running"
+    assert row["seconds"] == 3.5
+    assert row["status"] == "converted"
+
+
+def test_start_snapshots_the_report_it_is_about_to_replace(api: TestClient, tmp_path: Path, monkeypatch) -> None:
+    import batch_api
+
+    _write_input(tmp_path, "a.pdf")
+    _write_result(tmp_path, "a.pdf")
+    _write_report(tmp_path, [_entry(tmp_path, "a", "done", pages=5)])
+
+    class FakeProcess:
+        pid = 999_999
+
+        async def wait(self) -> int:
+            return 0
+
+        def terminate(self) -> None:
+            """The client's shutdown calls this; nothing is really running."""
+
+    async def fake_spawn(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(batch_api.asyncio, "create_subprocess_exec", fake_spawn)
+    # The monitor task would poll a pid that does not exist; keep it from running.
+    monkeypatch.setattr(batch_api.asyncio, "create_task", lambda coro: coro.close() or None)
+
+    api.post("/api/start")
+
+    previous = tmp_path / "run-report.previous.json"
+    assert previous.is_file(), "the report was not snapshotted, so a resume would lose it"
+    assert json.loads(previous.read_text(encoding="utf-8"))["entries"][0]["pages"] == 5

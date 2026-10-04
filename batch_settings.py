@@ -41,6 +41,7 @@ class BatchSettings:
     output_dir: Path
     runner: Path
     report: Path
+    report_previous: Path
     lock_path: Path
     run_log: Path
     ui_dist: Path
@@ -62,6 +63,7 @@ class BatchSettings:
             output_dir=output_dir,
             runner=Path(_env("MINERU_BATCH_RUNNER", str(base / "batch-convert.py"))),
             report=output_dir / "run-report.json",
+            report_previous=root / "run-report.previous.json",
             lock_path=root / ".run.lock",
             run_log=root / "run.log",
             ui_dist=base / "batch_webui" / "dist",

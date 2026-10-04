@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bucketCounts, bucketOf } from './buckets'
+import { bucketCounts, bucketOf, isResumable } from './buckets'
 import type { DocRow } from '../api/types'
 
 const row = (status: DocRow['status']): DocRow => ({
@@ -44,5 +44,19 @@ describe('bucketCounts', () => {
 
   it('reports zero for empty buckets rather than omitting them', () => {
     expect(bucketCounts([row('converted')])).toEqual({ all: 1, converted: 1, running: 0, pending: 0, failed: 0 })
+  })
+})
+
+describe('isResumable', () => {
+  it('is true for documents a run would still have work for', () => {
+    expect(isResumable(row('pending'))).toBe(true)
+    expect(isResumable(row('queued'))).toBe(true)
+    expect(isResumable(row('failed'))).toBe(true)
+  })
+
+  it('is false once a result exists, so a finished document selected by accident is skipped', () => {
+    expect(isResumable(row('converted'))).toBe(false)
+    expect(isResumable(row('done'))).toBe(false)
+    expect(isResumable(row('skipped'))).toBe(false)
   })
 })

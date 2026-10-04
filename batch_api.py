@@ -328,27 +328,46 @@ def _config_records() -> list[dict[str, Any]]:
     ]
 
 
+def _load_report(path: Path) -> dict[str, dict[str, Any]]:
+    """One report file, keyed by the output path inside ee-md."""
+    entries: dict[str, dict[str, Any]] = {}
+    if not path.is_file():
+        return entries
+    try:
+        for entry in json.loads(path.read_text(encoding="utf-8")).get("entries", []):
+            output = Path(entry.get("output", ""))
+            try:
+                key = output.relative_to(get_settings().output_dir).as_posix()
+            except ValueError:
+                continue
+            entries[key] = entry
+    except (OSError, ValueError):
+        pass
+    return entries
+
+
 def _report_entries() -> dict[str, dict[str, Any]]:
     """Run-report entries keyed by the output path inside ee-md.
 
     The report is the only record that a document was *attempted*: a failure leaves no
     `.md` behind, so without it a failed document would silently revert to "pending" once
     the run ends and its error message would be lost.
+
+    A re-run records every document it skipped without measurements of its own, so the
+    previous run's measurements fill those in — otherwise each resume blanks the column.
     """
-    settings = get_settings()
-    entries: dict[str, dict[str, Any]] = {}
-    if not settings.report.is_file():
-        return entries
-    try:
-        for entry in json.loads(settings.report.read_text(encoding="utf-8")).get("entries", []):
-            output = Path(entry.get("output", ""))
-            try:
-                key = output.relative_to(settings.output_dir).as_posix()
-            except ValueError:
-                continue
-            entries[key] = entry
-    except (OSError, ValueError):
-        pass
+    entries = _load_report(get_settings().report)
+    previous = _load_report(get_settings().report_previous)
+    for key, entry in entries.items():
+        if entry.get("pages") is not None:
+            continue
+        older = previous.get(key)
+        if not older:
+            continue
+        if older.get("pages") is not None:
+            entry["pages"] = older["pages"]
+        if older.get("seconds") is not None:
+            entry["seconds"] = older["seconds"]
     return entries
 
 
@@ -809,6 +828,12 @@ async def api_start() -> dict[str, Any]:
     state.reset()
     for relative in documents:
         state.row(relative)
+
+    # Snapshot the report the runner is about to replace. A resume records the documents
+    # it skipped without measurements, and this is what keeps them.
+    report = get_settings().report
+    if report.is_file():
+        shutil.copy2(report, get_settings().report_previous)
     command = [
         sys.executable,
         str(get_settings().runner),
