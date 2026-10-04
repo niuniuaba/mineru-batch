@@ -58,7 +58,7 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
                 type="button"
                 disabled={!row.has_result}
                 onClick={() => row.has_result && onPreview(row.path)}
-                className={row.has_result ? 'text-blue-700 hover:underline dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}
+                className={row.has_result ? 'text-blue-700 hover:underline dark:text-blue-300' : 'text-slate-700 dark:text-slate-300'}
               >
                 {row.path}
               </button>
@@ -81,7 +81,7 @@ export function DocumentsTable({ rows, selected, onToggle, onToggleAll, onPrevie
                   type="button"
                   aria-label={`Download ${row.path}`}
                   onClick={() => onDownload(row.path)}
-                  className="text-blue-700 hover:underline"
+                  className="text-blue-700 hover:underline dark:text-blue-300"
                 >
                   Download
                 </button>

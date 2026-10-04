@@ -3,51 +3,44 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { DropZone } from './DropZone'
 
-const openPicker = async (choice: RegExp) => {
-  await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
-  await userEvent.click(screen.getByRole('menuitem', { name: choice }))
-}
-
 describe('DropZone', () => {
-  it('offers a single upload button, not one per source', () => {
+  it('opens the file picker from a single click on the area', async () => {
     render(<DropZone onSubmit={vi.fn()} busy={false} />)
-    expect(screen.getAllByRole('button', { name: /^upload$/i })).toHaveLength(1)
-    expect(screen.queryByRole('button', { name: /folder/i })).not.toBeInTheDocument()
-  })
-
-  it('reveals the file and folder choices from that one button', async () => {
-    render(<DropZone onSubmit={vi.fn()} busy={false} />)
-    expect(screen.queryByRole('menuitem', { name: /files/i })).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
-    expect(screen.getByRole('menuitem', { name: /files/i })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /folder/i })).toBeInTheDocument()
-  })
-
-  it('opens the file picker from the files choice', async () => {
-    const onSubmit = vi.fn()
-    render(<DropZone onSubmit={onSubmit} busy={false} />)
     const input = screen.getByTestId('file-input') as HTMLInputElement
     const click = vi.spyOn(input, 'click').mockImplementation(() => {})
-    await openPicker(/files/i)
+    await userEvent.click(screen.getByRole('button', { name: /choose files/i }))
     expect(click).toHaveBeenCalled()
   })
 
-  it('opens the folder picker from the folder choice', async () => {
-    const onSubmit = vi.fn()
-    render(<DropZone onSubmit={onSubmit} busy={false} />)
+  it('opens the picker from the keyboard too', async () => {
+    render(<DropZone onSubmit={vi.fn()} busy={false} />)
+    const input = screen.getByTestId('file-input') as HTMLInputElement
+    const click = vi.spyOn(input, 'click').mockImplementation(() => {})
+    screen.getByRole('button', { name: /choose files/i }).focus()
+    await userEvent.keyboard('{Enter}')
+    expect(click).toHaveBeenCalled()
+  })
+
+  it('offers no menu of upload kinds', async () => {
+    render(<DropZone onSubmit={vi.fn()} busy={false} />)
+    await userEvent.click(screen.getByRole('button', { name: /choose files/i }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('still reaches folders, which the platform keeps on a separate input', async () => {
+    render(<DropZone onSubmit={vi.fn()} busy={false} />)
     const input = screen.getByTestId('folder-input') as HTMLInputElement
     const click = vi.spyOn(input, 'click').mockImplementation(() => {})
-    await openPicker(/folder/i)
+    await userEvent.click(screen.getByRole('button', { name: /choose a folder/i }))
     expect(click).toHaveBeenCalled()
   })
 
   it('submits relative paths for a folder selection', async () => {
     const onSubmit = vi.fn()
     render(<DropZone onSubmit={onSubmit} busy={false} />)
-    const input = screen.getByTestId('folder-input') as HTMLInputElement
     const file = new File(['x'], 'a.pdf')
     Object.defineProperty(file, 'webkitRelativePath', { value: 'papers/a.pdf' })
-    await userEvent.upload(input, file)
+    await userEvent.upload(screen.getByTestId('folder-input'), file)
     expect(onSubmit).toHaveBeenCalledWith([{ file, relative: 'papers/a.pdf' }])
   })
 
@@ -59,11 +52,45 @@ describe('DropZone', () => {
     expect(onSubmit).toHaveBeenCalledWith([{ file, relative: 'plain.pdf' }])
   })
 
-  it('does not submit when the picker returns nothing', async () => {
+  it('accepts several files at once', async () => {
     const onSubmit = vi.fn()
     render(<DropZone onSubmit={onSubmit} busy={false} />)
-    await userEvent.click(screen.getByRole('button', { name: /^upload$/i }))
-    expect(onSubmit).not.toHaveBeenCalled()
+    const files = [new File(['x'], 'a.pdf'), new File(['x'], 'b.pdf')]
+    await userEvent.upload(screen.getByTestId('file-input'), files)
+    expect(onSubmit.mock.calls[0][0].map((item: { relative: string }) => item.relative)).toEqual(['a.pdf', 'b.pdf'])
+  })
+
+  it('takes files and folders together when they are dropped', async () => {
+    const onSubmit = vi.fn()
+    render(<DropZone onSubmit={onSubmit} busy={false} />)
+    const fileEntry = (name: string) => ({
+      isFile: true,
+      isDirectory: false,
+      name,
+      file: (resolve: (file: File) => void) => resolve(new File(['x'], name)),
+    })
+    const dirEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: 'papers',
+      createReader: () => {
+        let call = 0
+        return {
+          readEntries: (resolve: (entries: unknown[]) => void) => resolve(call++ === 0 ? [fileEntry('b.pdf')] : []),
+        }
+      },
+    }
+    fireEvent.drop(screen.getByTestId('dropzone'), {
+      dataTransfer: {
+        items: [{ webkitGetAsEntry: () => fileEntry('a.pdf') }, { webkitGetAsEntry: () => dirEntry }],
+        files: [],
+      },
+    })
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect((onSubmit.mock.calls[0][0] as { relative: string }[]).map((i) => i.relative).sort()).toEqual([
+      'a.pdf',
+      'papers/b.pdf',
+    ])
   })
 
   it('ignores a drop while an upload is already running', () => {

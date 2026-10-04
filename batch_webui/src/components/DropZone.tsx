@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { UploadItem } from '../lib/uploadChain'
+
+const MAX_READER_BATCHES = 10_000
 
 interface Props {
   onSubmit: (items: UploadItem[]) => void
@@ -28,9 +30,11 @@ async function fromEntry(entry: FileSystemEntryLike, prefix: string, out: Upload
     const nested = `${prefix}${entry.name}/`
     // The reader hands back entries in batches and signals the end with an empty batch.
     // Reading it once silently truncates any folder with more than a batch of files.
-    for (;;) {
+    // Bounded: the contract says an empty batch ends the listing, but a reader that never
+    // reports one would otherwise spin forever and freeze the tab.
+    for (let batches = 0; batches < MAX_READER_BATCHES; batches += 1) {
       const batch = await new Promise<FileSystemEntryLike[]>((resolve, reject) => reader.readEntries(resolve, reject))
-      if (batch.length === 0) break
+      if (batch.length === 0) return
       for (const child of batch) await fromEntry(child, nested, out)
     }
   }
@@ -38,26 +42,8 @@ async function fromEntry(entry: FileSystemEntryLike, prefix: string, out: Upload
 
 export function DropZone({ onSubmit, busy }: Props) {
   const [dragging, setDragging] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
-  const menu = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const onDown = (event: MouseEvent) => {
-      if (!menu.current?.contains(event.target as Node)) setMenuOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [menuOpen])
 
   const collect = (input: HTMLInputElement | null) => {
     if (!input?.files?.length) return
@@ -69,15 +55,13 @@ export function DropZone({ onSubmit, busy }: Props) {
     input.value = ''
   }
 
-  const pick = (input: HTMLInputElement | null) => {
-    setMenuOpen(false)
-    input?.click()
-  }
-
   const handleDrop = async (event: React.DragEvent) => {
     event.preventDefault()
     setDragging(false)
     if (busy) return
+    // A drop carries whatever was dragged — files, folders, or both — because the entry
+    // API reports each one. The picker cannot do this: the platform gives a dialog that
+    // returns either loose files or one directory's contents, never both.
     const items: UploadItem[] = []
     const entries = Array.from(event.dataTransfer.items)
       .map((item) => (item.webkitGetAsEntry ? (item.webkitGetAsEntry() as unknown as FileSystemEntryLike | null) : null))
@@ -90,60 +74,59 @@ export function DropZone({ onSubmit, busy }: Props) {
     if (items.length) onSubmit(items)
   }
 
+  const openPicker = () => {
+    if (!busy) fileInput.current?.click()
+  }
+
   return (
     <div>
-      <section
+      <div
         data-testid="dropzone"
+        role="button"
+        tabIndex={0}
+        aria-label="Choose files, or drop files and folders here"
+        aria-disabled={busy}
+        onClick={openPicker}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            openPicker()
+          }
+        }}
         onDragOver={(event) => {
           event.preventDefault()
           setDragging(true)
         }}
         onDragLeave={(event) => {
-          // Moving onto a child fires dragleave on the section; only a real exit counts.
+          // Moving onto a child fires dragleave on the container; only a real exit counts.
           if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false)
         }}
         onDrop={handleDrop}
-        className={`rounded-lg border-2 border-dashed p-6 text-center text-sm transition ${
-          dragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-950' : 'border-slate-300 dark:border-slate-600'
+        className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center text-sm transition ${
+          dragging
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
+            : 'border-slate-300 hover:border-slate-400 dark:border-slate-600 dark:hover:border-slate-500'
         }`}
       >
-        <p className="text-slate-600 dark:text-slate-300">Drop files or a folder here — conversion starts immediately.</p>
-        <div ref={menu} className="relative mt-3 inline-block">
-          <button
-            type="button"
-            disabled={busy}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
-            className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
-          >
-            Upload
-          </button>
-          {menuOpen && (
-            <div
-              role="menu"
-              className="absolute left-1/2 z-10 mt-1 w-44 -translate-x-1/2 rounded border bg-white py-1 text-left shadow-lg dark:border-slate-600 dark:bg-slate-800"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => pick(fileInput.current)}
-                className="block w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
-              >
-                Choose files…
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => pick(folderInput.current)}
-                className="block w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
-              >
-                Choose folder…
-              </button>
-            </div>
-          )}
-        </div>
-      </section>
+        <p className="text-slate-600 dark:text-slate-300">
+          Click to choose files, or drop files and folders here.
+        </p>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Conversion starts immediately — there is no separate start step.
+        </p>
+      </div>
+
+      {/* One directory needs a distinct input from loose files, so this stays a link
+          rather than a second button of equal weight. */}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => folderInput.current?.click()}
+        className="mt-2 text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300"
+      >
+        Choose a folder instead…
+      </button>
+
       {/* Tailwind's `hidden` rather than the HTML attribute, so the control is reachable
           by assistive tech and by tests. */}
       <input

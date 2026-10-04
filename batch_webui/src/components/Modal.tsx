@@ -46,7 +46,7 @@ export function Modal({ open, title, onClose, children }: Props) {
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded px-2 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+            className="rounded px-2 text-slate-500 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
           >
             ✕
           </button>

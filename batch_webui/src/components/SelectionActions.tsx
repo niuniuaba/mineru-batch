@@ -22,7 +22,7 @@ export function SelectionActions({ selected, onDelete, onClearSelection, onError
   return (
     <div className="flex flex-wrap items-center gap-3 rounded border border-slate-200 bg-slate-50 p-2 text-sm dark:border-slate-700 dark:bg-slate-800">
       <span>{selected.length} selected</span>
-      <button type="button" onClick={downloadSelected} className="rounded bg-slate-900 px-3 py-1 text-white">
+      <button type="button" onClick={downloadSelected} className="rounded bg-slate-900 px-3 py-1 text-white dark:bg-slate-100 dark:text-slate-900">
         Download selected
       </button>
       <button type="button" onClick={onDelete} className="rounded border border-red-300 px-3 py-1 text-red-700 dark:border-red-800 dark:text-red-300">

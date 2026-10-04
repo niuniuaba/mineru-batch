@@ -19,9 +19,6 @@ export function UploadDialog({ open, onClose, onSubmit, busy }: Props) {
           onClose()
         }}
       />
-      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-        Conversion starts as soon as the documents are chosen — there is no separate start step.
-      </p>
     </Modal>
   )
 }

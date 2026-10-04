@@ -40,7 +40,7 @@ export function PreviewDrawer({ path, onClose }: Props) {
       className="fixed inset-y-0 right-0 z-20 w-1/2 overflow-y-auto border-l border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-900"
     >
       <header className="mb-4 flex items-center gap-3">
-        <h2 className="flex-1 truncate font-medium">{path}</h2>
+        <h2 className="flex-1 truncate font-medium dark:text-slate-100">{path}</h2>
         <button
           type="button"
           onClick={() => {
@@ -50,7 +50,7 @@ export function PreviewDrawer({ path, onClose }: Props) {
               .then((blob) => downloadBlob(blob, path.split('/').pop() ?? 'document.md'))
               .catch((failure: Error) => setError(failure.message))
           }}
-          className="text-sm text-blue-700 hover:underline"
+          className="text-sm text-blue-700 hover:underline dark:text-blue-300"
         >
           Download
         </button>
@@ -59,16 +59,21 @@ export function PreviewDrawer({ path, onClose }: Props) {
           onClick={() => {
             navigator.clipboard?.writeText(text).catch((failure: Error) => setError(`Copy failed: ${failure.message}`))
           }}
-          className="text-sm text-blue-700 hover:underline"
+          className="text-sm text-blue-700 hover:underline dark:text-blue-300"
         >
           Copy
         </button>
-        <button type="button" onClick={onClose} aria-label="Close preview">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close preview"
+          className="text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
+        >
           ✕
         </button>
       </header>
       {error && <p className="text-sm text-red-700 dark:text-red-400">{error}</p>}
-      <article className="prose prose-sm max-w-none">
+      <article className="prose prose-sm max-w-none dark:prose-invert">
         <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
           {text}
         </Markdown>
