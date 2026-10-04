@@ -49,9 +49,26 @@ which source won, and exactly how to change it.
 ## Run
 
 ```bash
-# Development: Vite on :5173, proxying /api to a control plane on :8090
-<venv>/bin/python batch_api.py &
-cd batch_webui && bun install && bun run dev
+# Foreground, serving the console and the API on :8090
+MINERU_PYTHON=/path/to/venv/bin/python ./run.sh
+```
+
+`MINERU_PYTHON` must be an interpreter where MinerU is installed. `run.sh` checks that
+before starting, and says so if it is not — a directory given to `python` instead of a
+script fails with an unhelpful `can't find '__main__' module`.
+
+Build the console first if `/` shows the fallback UI:
+
+```bash
+cd batch_webui && bun install && bun run build
+```
+
+For development, run Vite on `:5173` with hot reload, proxying `/api` to a control plane
+on `:8090`:
+
+```bash
+MINERU_PYTHON=/path/to/venv/bin/python ./run.sh &   # the API
+cd batch_webui && bun run dev                        # the console, proxied
 ```
 
 ## Deploy
