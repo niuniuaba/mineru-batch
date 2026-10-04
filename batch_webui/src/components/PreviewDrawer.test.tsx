@@ -1,8 +1,11 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { PreviewDrawer } from './PreviewDrawer'
 
 const getContent = vi.fn()
+const copyText = vi.fn()
+vi.mock('../lib/clipboard', () => ({ copyText: (text: string) => copyText(text) }))
 vi.mock('../api/mineru', () => ({
   getContent: (path: string) => getContent(path),
   downloadResult: () => Promise.resolve(new Blob(['x'])),
@@ -52,5 +55,44 @@ describe('PreviewDrawer', () => {
     render(<PreviewDrawer path="a.md" onClose={onClose} />)
     ;(await screen.findByRole('button', { name: /close preview/i })).click()
     expect(onClose).toHaveBeenCalled()
+  })
+})
+
+describe('PreviewDrawer copy', () => {
+  it('copies the document body, not the rendered element', async () => {
+    copyText.mockClear()
+    getContent.mockClear()
+    getContent.mockResolvedValue('# Title\n\nbody text')
+    copyText.mockResolvedValue(undefined)
+    render(<PreviewDrawer path="a.md" onClose={() => {}} />)
+    await screen.findByRole('heading', { name: 'Title' })
+
+    await userEvent.click(screen.getByRole('button', { name: /^copy$/i }))
+
+    expect(copyText).toHaveBeenCalledWith('# Title\n\nbody text')
+  })
+
+  it('confirms the copy, because a silent no-op is indistinguishable from success', async () => {
+    copyText.mockClear()
+    getContent.mockClear()
+    getContent.mockResolvedValue('# t')
+    copyText.mockResolvedValue(undefined)
+    render(<PreviewDrawer path="a.md" onClose={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /^copy$/i }))
+
+    expect(await screen.findByRole('button', { name: /^copied$/i })).toBeInTheDocument()
+  })
+
+  it('says so when the copy is refused', async () => {
+    copyText.mockClear()
+    getContent.mockClear()
+    getContent.mockResolvedValue('# t')
+    copyText.mockRejectedValue(new Error('the browser refused to copy to the clipboard'))
+    render(<PreviewDrawer path="a.md" onClose={() => {}} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /^copy$/i }))
+
+    expect(await screen.findByText(/refused to copy/i)).toBeInTheDocument()
   })
 })

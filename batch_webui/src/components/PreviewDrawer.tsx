@@ -4,6 +4,7 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { downloadResult, getContent } from '../api/mineru'
+import { copyText } from '../lib/clipboard'
 import { downloadBlob } from '../lib/download'
 import { loadPreview } from '../lib/preview'
 
@@ -15,6 +16,20 @@ interface Props {
 export function PreviewDrawer({ path, onClose }: Props) {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const copy = () => {
+    copyText(text)
+      .then(() => setCopied(true))
+      .catch((failure: Error) => setError(`Copy failed: ${failure.message}`))
+  }
+
+  // A brief confirmation, so a copy that did nothing cannot look like it worked.
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
 
   useEffect(() => {
     if (!path) return
@@ -54,14 +69,8 @@ export function PreviewDrawer({ path, onClose }: Props) {
         >
           Download
         </button>
-        <button
-          type="button"
-          onClick={() => {
-            navigator.clipboard?.writeText(text).catch((failure: Error) => setError(`Copy failed: ${failure.message}`))
-          }}
-          className="text-sm text-blue-700 hover:underline dark:text-blue-300"
-        >
-          Copy
+        <button type="button" onClick={copy} className="text-sm text-blue-700 hover:underline dark:text-blue-300">
+          {copied ? 'Copied' : 'Copy'}
         </button>
         <button
           type="button"
