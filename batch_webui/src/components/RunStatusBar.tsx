@@ -18,9 +18,12 @@ export function RunStatusBar({ status, onStop, onClear }: Props) {
       <span className={`rounded px-2 py-0.5 ${running ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100' : 'bg-slate-100 dark:bg-slate-700'}`}>
         {status.state}
       </span>
-      <span>
+      <span data-testid="run-counts">
         {/* skipped is terminal: a resumed run converts nothing but is finished */}
-        {done + skipped + failed}/{total} processed · {failed} failed
+        {done + skipped + failed}/{total} processed · {failed} failed ·{' '}
+        <span title="Documents the runner would pick up from the input directory">
+          {status.config.queued_in_input} in input folder
+        </span>
       </span>
       {status.current_file && (
         <span className="text-slate-600 dark:text-slate-300">
